@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hospital Appointment Duplicate Prevention Platform</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="dark-theme">
+
+    <!-- Top Navigation Bar -->
+    <header class="navbar">
+        <div class="nav-container">
+            <div class="logo">
+                <span class="logo-icon">🏥</span>
+                <div class="logo-text">
+                    <h1>SafeBook Hospital</h1>
+                    <span class="logo-sub">Idempotency & Concurrency Prevention Demo</span>
+                </div>
+            </div>
+
+            <!-- Role Selector -->
+            <div class="role-selector-container">
+                <label for="roleSelect">Active Role:</label>
+                <select id="roleSelect" onchange="switchRole(this.value)">
+                    <option value="patient">👤 Patient</option>
+                    <option value="staff">👨‍⚕️ Hospital Staff / Admin</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Navigation Tabs -->
+        <nav class="nav-tabs">
+            <button class="tab-btn active" onclick="switchTab('booking-tab')">📅 Booking Screen</button>
+            <button class="tab-btn" onclick="switchTab('appointments-tab')">📋 Appointments List</button>
+            <button class="tab-btn" id="staff-attempts-nav" onclick="switchTab('staff-attempts-tab')" style="display:none;">⚠️ Failed Attempts Audit</button>
+            <button class="tab-btn" onclick="switchTab('dashboard-tab')">📊 Test Harness & Metrics</button>
+            <button class="tab-btn" onclick="switchTab('config-tab')">⚙️ System Rules Config</button>
+        </nav>
+    </header>
+
+    <!-- Main Container -->
+    <main class="main-content">
+
+        <!-- TAB 1: BOOKING SCREEN -->
+        <section id="booking-tab" class="tab-content active">
+            <div class="grid-2col">
+                <!-- Booking Form Card -->
+                <div class="card glass-card">
+                    <div class="card-header">
+                        <h2>Book Patient Appointment</h2>
+                        <p class="subtitle">Select a doctor slot and choose booking mode to test duplicate prevention.</p>
+                    </div>
+                    <form id="bookingForm" onsubmit="handleBookingSubmit(event)">
+                        <div class="form-group">
+                            <label for="patient_id">Patient ID</label>
+                            <input type="text" id="patient_id" value="P-101" required placeholder="e.g. P-101">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="doctor_id">Doctor & Specialty</label>
+                            <select id="doctor_id" required>
+                                <option value="DOC-CARDIOLOGY-01">Dr. Sarah Jenkins (Cardiology)</option>
+                                <option value="DOC-NEUROLOGY-02">Dr. Marcus Chen (Neurology)</option>
+                                <option value="DOC-PEDIATRICS-03">Dr. Elena Rostova (Pediatrics)</option>
+                                <option value="DOC-ORTHO-04">Dr. James Wilson (Orthopedics)</option>
+                                <option value="DOC-GENERAL-05">Dr. Anita Patel (General Medicine)</option>
+                            </select>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="appointment_date">Date</label>
+                                <input type="date" id="appointment_date" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="appointment_time">Time Slot</label>
+                                <select id="appointment_time" required>
+                                    <option value="09:00">09:00 AM</option>
+                                    <option value="09:30">09:30 AM</option>
+                                    <option value="10:00" selected>10:00 AM</option>
+                                    <option value="10:30">10:30 AM</option>
+                                    <option value="11:00">11:00 AM</option>
+                                    <option value="14:00">02:00 PM</option>
+                                    <option value="14:30">02:30 PM</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="idempotency_key">
+                                Idempotency Key 
+                                <small>(Prevents retries from double-booking)</small>
+                            </label>
+                            <div class="input-with-button">
+                                <input type="text" id="idempotency_key" placeholder="Client UUID or Key">
+                                <button type="button" class="btn btn-secondary" onclick="generateIdempotencyKey()">⚡ Auto-Gen</button>
+                            </div>
+                        </div>
+
+                        <div class="form-group mode-toggle-group">
+                            <label>Execution Mode:</label>
+                            <div class="radio-group">
+                                <label class="radio-card active-protected">
+                                    <input type="radio" name="bookingMode" value="protected" checked>
+                                    <span class="radio-title">🛡️ Protected Prototype</span>
+                                    <span class="radio-desc">Atomic UNIQUE Lock & Idempotency</span>
+                                </label>
+                                <label class="radio-card active-baseline">
+                                    <input type="radio" name="bookingMode" value="baseline">
+                                    <span class="radio-title">⚠️ Baseline (Vulnerable)</span>
+                                    <span class="radio-desc">Check-then-Insert Race Window</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary btn-block btn-lg" id="bookSubmitBtn">
+                            Submit Booking Request
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Live Result Display Card -->
+                <div class="card glass-card">
+                    <div class="card-header">
+                        <h2>Booking Result & Explanation</h2>
+                        <p class="subtitle">Live HTTP response & hospital reviewer explanation.</p>
+                    </div>
+                    <div id="bookingResultPlaceholder" class="placeholder-box">
+                        <span class="placeholder-icon">📬</span>
+                        <p>Submit a booking request to view the response payload and concurrency trace explanation.</p>
+                    </div>
+                    <div id="bookingResultCard" class="result-card" style="display:none;">
+                        <!-- Dynamic Result Content -->
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 2: APPOINTMENTS LIST -->
+        <section id="appointments-tab" class="tab-content">
+            <div class="card glass-card">
+                <div class="card-header flex-between">
+                    <div>
+                        <h2>Hospital Confirmed Appointments</h2>
+                        <p class="subtitle">View all registered appointments in SQLite storage.</p>
+                    </div>
+                    <div class="filters">
+                        <select id="appFilterMode" onchange="loadAppointments()">
+                            <option value="">All Modes</option>
+                            <option value="protected">🛡️ Protected</option>
+                            <option value="baseline">⚠️ Baseline</option>
+                        </select>
+                        <button class="btn btn-secondary" onclick="loadAppointments()">🔄 Refresh</button>
+                    </div>
+                </div>
+                <div class="table-responsive">
+                    <table class="data-table" id="appointmentsTable">
+                        <thead>
+                            <tr>
+                                <th>Appointment ID</th>
+                                <th>Patient ID</th>
+                                <th>Doctor</th>
+                                <th>Date & Time</th>
+                                <th>Idempotency Key</th>
+                                <th>Mode</th>
+                                <th>Status</th>
+                                <th>Created At</th>
+                            </tr>
+                        </thead>
+                        <tbody id="appointmentsTableBody">
+                            <!-- Rows loaded dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 3: STAFF FAILED ATTEMPTS AUDIT -->
+        <section id="staff-attempts-tab" class="tab-content">
+            <div class="card glass-card">
+                <div class="card-header">
+                    <h2>Staff Audit — Rejected / Failed Booking Attempts</h2>
+                    <p class="subtitle">Hospital staff review of rejected slot conflicts and failed attempts.</p>
+                </div>
+                <div class="table-responsive">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Trace ID</th>
+                                <th>Attempted Patient</th>
+                                <th>Doctor Slot</th>
+                                <th>Timestamp</th>
+                                <th>Failure Reason</th>
+                                <th>Reviewer Explanation</th>
+                            </tr>
+                        </thead>
+                        <tbody id="staffFailedTableBody">
+                            <!-- Loaded dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 4: TEST HARNESS & METRICS DASHBOARD -->
+        <section id="dashboard-tab" class="tab-content">
+
+            <!-- Test Trigger Control Bar -->
+            <div class="card glass-card highlight-card">
+                <div class="card-header">
+                    <h2>🧪 Concurrency & Retry Test Harness</h2>
+                    <p class="subtitle">Launch automated simulations to compare Baseline vs Protected Prototype under load.</p>
+                </div>
+                <div class="test-controls-grid">
+                    <button class="btn btn-outline" onclick="triggerTest('normal')">
+                        <span class="btn-icon">1️⃣</span> Test 1: Normal Single Request
+                    </button>
+                    <button class="btn btn-outline" onclick="triggerTest('retry')">
+                        <span class="btn-icon">🔁</span> Test 2: 3x Retry Simulation
+                    </button>
+                    <button class="btn btn-warning" onclick="triggerTest('concurrent')">
+                        <span class="btn-icon">⚡</span> Test 3: 10x Concurrent Race Condition
+                    </button>
+                    <button class="btn btn-success" onclick="triggerTest('synthetic')">
+                        <span class="btn-icon">📊</span> Test 4: Run 60-Item Synthetic Benchmark
+                    </button>
+                    <button class="btn btn-danger" onclick="resetAllData()">
+                        <span class="btn-icon">🗑️</span> Reset All Test Data
+                    </button>
+                </div>
+            </div>
+
+            <!-- Side-by-Side Metrics Comparison Table -->
+            <div class="card glass-card margin-top">
+                <div class="card-header flex-between">
+                    <div>
+                        <h2>Measured Metrics Comparison</h2>
+                        <p class="subtitle">Real-time measured results: Baseline vs Protected Prototype.</p>
+                    </div>
+                    <span class="badge badge-info" id="lastUpdatedBadge">Live Database Metrics</span>
+                </div>
+                <div class="table-responsive">
+                    <table class="metrics-table">
+                        <thead>
+                            <tr>
+                                <th>Metric Description</th>
+                                <th class="col-baseline">Baseline Mode (Unprotected)</th>
+                                <th class="col-protected">Protected Prototype</th>
+                                <th>Impact & Safety Note</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Total Requests Processed</td>
+                                <td id="m-base-total">0</td>
+                                <td id="m-prot-total">0</td>
+                                <td>Total incoming HTTP requests</td>
+                            </tr>
+                            <tr>
+                                <td>Successful Bookings</td>
+                                <td id="m-base-success">0</td>
+                                <td id="m-prot-success">0</td>
+                                <td>Confirmed appointment records created</td>
+                            </tr>
+                            <tr class="highlight-row-danger">
+                                <td>⚠️ Duplicate Records Created</td>
+                                <td id="m-base-dup-created" class="text-danger bold">0</td>
+                                <td id="m-prot-dup-created" class="text-success bold">0</td>
+                                <td>Double-bookings stored in DB for same slot</td>
+                            </tr>
+                            <tr class="highlight-row-success">
+                                <td>🛡️ Duplicate Records Prevented</td>
+                                <td id="m-base-dup-prevented">0</td>
+                                <td id="m-prot-dup-prevented" class="text-success bold">0</td>
+                                <td>Conflicting requests safely blocked / deduplicated</td>
+                            </tr>
+                            <tr>
+                                <td>Retry Requests Processed</td>
+                                <td id="m-base-retry">0</td>
+                                <td id="m-prot-retry">0</td>
+                                <td>Network retry attempts</td>
+                            </tr>
+                            <tr>
+                                <td>Concurrent Race Attempts</td>
+                                <td id="m-base-concurrent">0</td>
+                                <td id="m-prot-concurrent">0</td>
+                                <td>Simultaneous millisecond requests</td>
+                            </tr>
+                            <tr class="metrics-highlight-header">
+                                <td><strong>Duplicate Prevention Rate (%)</strong></td>
+                                <td id="m-base-rate" class="rate-badge rate-bad">0.0%</td>
+                                <td id="m-prot-rate" class="rate-badge rate-good">100.0%</td>
+                                <td><code>(Prevented / Attempts) × 100</code></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Request Traces Table -->
+            <div class="card glass-card margin-top">
+                <div class="card-header flex-between">
+                    <div>
+                        <h2>Execution Request Traces</h2>
+                        <p class="subtitle">Complete millisecond audit log of every request execution.</p>
+                    </div>
+                    <div class="filters">
+                        <select id="traceFilterMode" onchange="loadTraces()">
+                            <option value="">All Modes</option>
+                            <option value="protected">Protected</option>
+                            <option value="baseline">Baseline</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="table-responsive">
+                    <table class="data-table" id="tracesTable">
+                        <thead>
+                            <tr>
+                                <th>Trace ID</th>
+                                <th>Mode</th>
+                                <th>Test Type</th>
+                                <th>Doctor Slot</th>
+                                <th>Idempotency Key</th>
+                                <th>Status</th>
+                                <th>DB Result</th>
+                                <th>Latency</th>
+                                <th>Explanation</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tracesTableBody">
+                            <!-- Loaded dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 5: SYSTEM RULES CONFIG -->
+        <section id="config-tab" class="tab-content">
+            <div class="card glass-card max-width-600">
+                <div class="card-header">
+                    <h2>Configurable Concurrency & Idempotency Rules</h2>
+                    <p class="subtitle">Dynamically adjust safety policies and simulated latencies.</p>
+                </div>
+                <form id="configForm" onsubmit="handleConfigSubmit(event)">
+                    <div class="form-group">
+                        <label for="cfg_max_retries">MAX_RETRIES</label>
+                        <input type="number" id="cfg_max_retries" min="1" max="10">
+                    </div>
+                    <div class="form-group checkbox-group">
+                        <label>
+                            <input type="checkbox" id="cfg_enable_idempotency">
+                            ENABLE_IDEMPOTENCY (Return cached booking on retry)
+                        </label>
+                    </div>
+                    <div class="form-group checkbox-group">
+                        <label>
+                            <input type="checkbox" id="cfg_enable_concurrency">
+                            ENABLE_CONCURRENCY_PROTECTION (Database UNIQUE lock)
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label for="cfg_policy">SLOT_CONFLICT_POLICY</label>
+                        <select id="cfg_policy">
+                            <option value="reject">reject (HTTP 409 Conflict)</option>
+                            <option value="queue">queue (Simulated waitlist)</option>
+                            <option value="log_only">log_only (Log warning)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="cfg_delay">SIMULATED_PROCESSING_DELAY_MS (Race Window Width)</label>
+                        <input type="number" id="cfg_delay" min="0" max="500">
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-block">Save Configuration</button>
+                </form>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Modal for Detailed Explanation Layer -->
+    <div id="explanationModal" class="modal-overlay" onclick="closeExplanationModal(event)">
+        <div class="modal-card card glass-card">
+            <div class="modal-header">
+                <h3 id="modalTitle">Hospital Reviewer Explanation</h3>
+                <button class="close-btn" onclick="closeExplanationModalDirect()">&times;</button>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <!-- Loaded dynamically -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeExplanationModalDirect()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

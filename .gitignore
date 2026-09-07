@@ -1,0 +1,7 @@
+﻿hospital_appointments.db
+desktop.ini
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
