@@ -576,6 +576,84 @@ input:focus, select:focus {
     text-align: right;
 }
 
+.role-badge {
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+.badge-patient { background: rgba(56, 189, 248, 0.2); color: var(--primary); border: 1px solid var(--primary); }
+.badge-staff { background: rgba(129, 140, 248, 0.2); color: var(--accent); border: 1px solid var(--accent); }
+
+.metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+}
+
+.metric-card {
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid var(--card-border);
+    border-radius: 10px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.metric-title {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.metric-value {
+    font-size: 1.6rem;
+    font-weight: 700;
+    font-family: var(--font-heading);
+}
+
+.fallback-box {
+    margin-top: 16px;
+    background: rgba(251, 191, 36, 0.08);
+    border: 1px dashed var(--warning);
+    border-radius: 8px;
+    padding: 14px;
+    font-size: 0.88rem;
+}
+
+.fallback-slots-list {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+}
+
+.explanation-rule-item {
+    background: rgba(15, 23, 42, 0.5);
+    border: 1px solid var(--card-border);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 12px;
+}
+
+.explanation-rule-item p {
+    font-size: 0.88rem;
+    color: var(--text-main);
+    margin-top: 6px;
+}
+
+.fallback-list {
+    margin-top: 12px;
+    padding-left: 20px;
+    font-size: 0.9rem;
+    line-height: 1.7;
+    color: var(--text-muted);
+}
+
 .text-danger { color: var(--danger); }
 .text-success { color: var(--success); }
+.text-info { color: var(--primary); }
 .bold { font-weight: 700; }
+

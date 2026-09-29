@@ -47,12 +47,14 @@ def read_config():
     return get_config()
 
 @app.post("/api/config", response_model=SystemConfig)
+@app.put("/api/config", response_model=SystemConfig)
 def save_config(config: SystemConfig):
-    """Update active configurable system rules."""
+    """Update active configurable system rules (supports POST and PUT)."""
     return update_config(config)
 
 # --- Appointment Endpoints ---
 @app.post("/api/appointments")
+@app.post("/api/appointments/book")
 async def create_appointment(
     data: AppointmentCreate,
     mode: str = Query("protected", description="Booking mode: 'protected' or 'baseline'")
@@ -80,6 +82,72 @@ def list_appointments(
     if status:
         apps = [a for a in apps if a.get("booking_status") == status]
     return apps
+
+@app.get("/api/appointments/{appointment_id}")
+def get_appointment_by_id(appointment_id: str):
+    """Retrieve details for a specific appointment by appointment_id."""
+    apps = fetch_all_appointments()
+    match = [a for a in apps if a.get("appointment_id") == appointment_id]
+    if not match:
+        raise HTTPException(status_code=404, detail=f"Appointment '{appointment_id}' not found.")
+    return match[0]
+
+# --- Integration & Audit Tracing Endpoints ---
+@app.get("/api/traces")
+def list_traces(mode: Optional[str] = None):
+    """Retrieves all request audit traces."""
+    return fetch_all_traces(mode=mode)
+
+@app.get("/api/traces/{request_id}")
+def get_trace(request_id: str):
+    """Retrieve trace execution record for specific request_id or trace_id."""
+    from app.database import fetch_trace_by_id
+    trace = fetch_trace_by_id(request_id)
+    if not trace:
+        raise HTTPException(status_code=404, detail=f"Trace for request ID '{request_id}' not found.")
+    return trace
+
+@app.get("/api/retries")
+def list_retry_events(request_id: Optional[str] = None):
+    """Retrieves list of recorded retry and deduplication events."""
+    from app.retry_tracker import fetch_all_retries
+    return fetch_all_retries(request_id=request_id)
+
+@app.get("/api/retries/{request_id}")
+def get_retries_for_request(request_id: str):
+    """Retrieves retry events associated with a specific request_id."""
+    from app.retry_tracker import fetch_all_retries
+    events = fetch_all_retries(request_id=request_id)
+    return events
+
+@app.get("/api/metrics")
+def get_system_metrics():
+    """Returns baseline vs protected quantitative metrics and duplicate prevention rates."""
+    traces = fetch_all_traces()
+    apps = fetch_all_appointments()
+
+    baseline_traces = [t for t in traces if t["mode"] == "baseline"]
+    baseline_apps = [a for a in apps if a.get("mode") == "baseline"]
+    baseline_metrics = calculate_metrics_for_mode("baseline", baseline_traces, baseline_apps)
+
+    protected_traces = [t for t in traces if t["mode"] == "protected"]
+    protected_apps = [a for a in apps if a.get("mode") == "protected"]
+    protected_metrics = calculate_metrics_for_mode("protected", protected_traces, protected_apps)
+
+    return {
+        "baseline": baseline_metrics,
+        "protected": protected_metrics
+    }
+
+@app.get("/api/validation/results")
+async def get_validation_results():
+    """Executes or returns the validation dataset suite results."""
+    from app.validation import load_validation_dataset
+    dataset = load_validation_dataset()
+    return {
+        "total_validation_cases": len(dataset),
+        "dataset": dataset
+    }
 
 # --- Test Harness Endpoints ---
 @app.post("/api/tests/normal")
@@ -159,3 +227,4 @@ def read_root():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app.main:app", host="127.0.0.1", port=8000, reload=True)
+

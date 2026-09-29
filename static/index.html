@@ -18,15 +18,16 @@
                 <span class="logo-icon">🏥</span>
                 <div class="logo-text">
                     <h1>SafeBook Hospital</h1>
-                    <span class="logo-sub">Idempotency & Concurrency Prevention Demo</span>
+                    <span class="logo-sub">Idempotency & Concurrency Prevention Platform</span>
                 </div>
             </div>
 
             <!-- Role Selector -->
             <div class="role-selector-container">
-                <label for="roleSelect">Active Role:</label>
+                <span class="role-badge" id="roleBadge">Role: Patient</span>
+                <label for="roleSelect">Switch Role:</label>
                 <select id="roleSelect" onchange="switchRole(this.value)">
-                    <option value="patient">👤 Patient</option>
+                    <option value="patient" selected>👤 Patient</option>
                     <option value="staff">👨‍⚕️ Hospital Staff / Admin</option>
                 </select>
             </div>
@@ -34,18 +35,22 @@
 
         <!-- Navigation Tabs -->
         <nav class="nav-tabs">
-            <button class="tab-btn active" onclick="switchTab('booking-tab')">📅 Booking Screen</button>
-            <button class="tab-btn" onclick="switchTab('appointments-tab')">📋 Appointments List</button>
-            <button class="tab-btn" id="staff-attempts-nav" onclick="switchTab('staff-attempts-tab')" style="display:none;">⚠️ Failed Attempts Audit</button>
-            <button class="tab-btn" onclick="switchTab('dashboard-tab')">📊 Test Harness & Metrics</button>
-            <button class="tab-btn" onclick="switchTab('config-tab')">⚙️ System Rules Config</button>
+            <button class="tab-btn active" onclick="switchTab('booking-tab')">📅 A. Booking</button>
+            <button class="tab-btn" onclick="switchTab('patient-tab')">👤 B. Patient View</button>
+            <button class="tab-btn admin-only" onclick="switchTab('staff-tab')">🏥 C. Staff/Admin View</button>
+            <button class="tab-btn admin-only" onclick="switchTab('config-tab')">⚙️ D. Configuration</button>
+            <button class="tab-btn admin-only" onclick="switchTab('traces-tab')">🔍 E. Request Traces</button>
+            <button class="tab-btn admin-only" onclick="switchTab('retries-tab')">🔄 F. Retry Events</button>
+            <button class="tab-btn admin-only" onclick="switchTab('transactions-tab')">💳 G. Transaction Events</button>
+            <button class="tab-btn" onclick="switchTab('metrics-tab')">📊 H. Verification Metrics</button>
+            <button class="tab-btn" onclick="switchTab('explanation-tab')">💡 I. Decision Explanations</button>
         </nav>
     </header>
 
     <!-- Main Container -->
     <main class="main-content">
 
-        <!-- TAB 1: BOOKING SCREEN -->
+        <!-- SECTION A: BOOKING SCREEN -->
         <section id="booking-tab" class="tab-content active">
             <div class="grid-2col">
                 <!-- Booking Form Card -->
@@ -126,12 +131,12 @@
                 <!-- Live Result Display Card -->
                 <div class="card glass-card">
                     <div class="card-header">
-                        <h2>Booking Result & Explanation</h2>
-                        <p class="subtitle">Live HTTP response & hospital reviewer explanation.</p>
+                        <h2>Booking Result & Rationale</h2>
+                        <p class="subtitle">Live HTTP response, transparent explanation, and fallback recommendations.</p>
                     </div>
                     <div id="bookingResultPlaceholder" class="placeholder-box">
                         <span class="placeholder-icon">📬</span>
-                        <p>Submit a booking request to view the response payload and concurrency trace explanation.</p>
+                        <p>Submit a booking request to view the response payload, trace ID, and explanation.</p>
                     </div>
                     <div id="bookingResultCard" class="result-card" style="display:none;">
                         <!-- Dynamic Result Content -->
@@ -140,38 +145,30 @@
             </div>
         </section>
 
-        <!-- TAB 2: APPOINTMENTS LIST -->
-        <section id="appointments-tab" class="tab-content">
+        <!-- SECTION B: PATIENT VIEW -->
+        <section id="patient-tab" class="tab-content">
             <div class="card glass-card">
                 <div class="card-header flex-between">
                     <div>
-                        <h2>Hospital Confirmed Appointments</h2>
-                        <p class="subtitle">View all registered appointments in SQLite storage.</p>
+                        <h2>👤 Patient Portal — My Appointments & Status</h2>
+                        <p class="subtitle">View personal bookings, explanation details, and quick retry actions.</p>
                     </div>
-                    <div class="filters">
-                        <select id="appFilterMode" onchange="loadAppointments()">
-                            <option value="">All Modes</option>
-                            <option value="protected">🛡️ Protected</option>
-                            <option value="baseline">⚠️ Baseline</option>
-                        </select>
-                        <button class="btn btn-secondary" onclick="loadAppointments()">🔄 Refresh</button>
-                    </div>
+                    <button class="btn btn-secondary" onclick="loadPatientAppointments()">🔄 Refresh My View</button>
                 </div>
                 <div class="table-responsive">
-                    <table class="data-table" id="appointmentsTable">
+                    <table class="data-table">
                         <thead>
                             <tr>
                                 <th>Appointment ID</th>
-                                <th>Patient ID</th>
                                 <th>Doctor</th>
                                 <th>Date & Time</th>
-                                <th>Idempotency Key</th>
-                                <th>Mode</th>
                                 <th>Status</th>
-                                <th>Created At</th>
+                                <th>Reason Code</th>
+                                <th>Human Explanation</th>
+                                <th>Action</th>
                             </tr>
                         </thead>
-                        <tbody id="appointmentsTableBody">
+                        <tbody id="patientAppointmentsBody">
                             <!-- Rows loaded dynamically -->
                         </tbody>
                     </table>
@@ -179,26 +176,144 @@
             </div>
         </section>
 
-        <!-- TAB 3: STAFF FAILED ATTEMPTS AUDIT -->
-        <section id="staff-attempts-tab" class="tab-content">
+        <!-- SECTION C: STAFF/ADMIN VIEW -->
+        <section id="staff-tab" class="tab-content">
             <div class="card glass-card">
+                <div class="card-header flex-between">
+                    <div>
+                        <h2>🏥 Hospital Staff & Admin Control Center</h2>
+                        <p class="subtitle">Comprehensive overview of appointments, duplicate prevention events, and verification state.</p>
+                    </div>
+                    <div class="filters">
+                        <select id="staffFilterMode" onchange="loadStaffView()">
+                            <option value="">All Modes</option>
+                            <option value="protected">Protected</option>
+                            <option value="baseline">Baseline</option>
+                        </select>
+                        <button class="btn btn-secondary" onclick="loadStaffView()">🔄 Refresh Staff Data</button>
+                    </div>
+                </div>
+
+                <div class="metrics-grid margin-top">
+                    <div class="metric-card">
+                        <span class="metric-title">Total Appointments Recorded</span>
+                        <span class="metric-value" id="staff-total-apps">0</span>
+                    </div>
+                    <div class="metric-card">
+                        <span class="metric-title">Duplicate Records Prevented</span>
+                        <span class="metric-value text-success" id="staff-prevented-count">0</span>
+                    </div>
+                    <div class="metric-card">
+                        <span class="metric-title">Duplicate Prevention Rate</span>
+                        <span class="metric-value text-info" id="staff-prevention-rate">100.0%</span>
+                    </div>
+                </div>
+
+                <div class="margin-top">
+                    <h3>All Appointment Records</h3>
+                    <div class="table-responsive margin-top">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Appointment ID</th>
+                                    <th>Patient ID</th>
+                                    <th>Doctor</th>
+                                    <th>Slot</th>
+                                    <th>Idempotency Key</th>
+                                    <th>Mode</th>
+                                    <th>Status</th>
+                                    <th>Created At</th>
+                                </tr>
+                            </thead>
+                            <tbody id="staffAppointmentsTableBody">
+                                <!-- Loaded dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- SECTION D: CONFIGURATION -->
+        <section id="config-tab" class="tab-content">
+            <div class="card glass-card max-width-600">
                 <div class="card-header">
-                    <h2>Staff Audit — Rejected / Failed Booking Attempts</h2>
-                    <p class="subtitle">Hospital staff review of rejected slot conflicts and failed attempts.</p>
+                    <h2>⚙️ Configurable Business Rules</h2>
+                    <p class="subtitle">Dynamic system rules configuration for idempotency, concurrency, and conflict policies.</p>
+                </div>
+                <form id="configForm" onsubmit="handleConfigSubmit(event)">
+                    <div class="form-group">
+                        <label for="cfg_max_retries">MAX_RETRIES</label>
+                        <input type="number" id="cfg_max_retries" min="1" max="10">
+                    </div>
+                    <div class="form-group checkbox-group">
+                        <label>
+                            <input type="checkbox" id="cfg_enable_idempotency">
+                            ENABLE_IDEMPOTENCY (Return cached booking on key match)
+                        </label>
+                    </div>
+                    <div class="form-group checkbox-group">
+                        <label>
+                            <input type="checkbox" id="cfg_enable_concurrency">
+                            ENABLE_CONCURRENCY_PROTECTION (Atomic UNIQUE database lock)
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label for="cfg_policy">SLOT_CONFLICT_POLICY</label>
+                        <select id="cfg_policy">
+                            <option value="REJECT">REJECT (HTTP 409 Conflict)</option>
+                            <option value="RETRY">RETRY (Suggest automated client retry)</option>
+                            <option value="FALLBACK">FALLBACK (Suggest alternative available slots)</option>
+                        </select>
+                    </div>
+                    <div class="form-group checkbox-group">
+                        <label>
+                            <input type="checkbox" id="cfg_enable_tracing" checked>
+                            ENABLE_REQUEST_TRACING (Log step execution pipeline)
+                        </label>
+                    </div>
+                    <div class="form-group checkbox-group">
+                        <label>
+                            <input type="checkbox" id="cfg_enable_explanation" checked>
+                            ENABLE_EXPLANATION_LAYER (Embed human-readable rationales)
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label for="cfg_delay">SIMULATED_PROCESSING_DELAY_MS (Race Window Width)</label>
+                        <input type="number" id="cfg_delay" min="0" max="500">
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-block">Update System Rules</button>
+                </form>
+            </div>
+        </section>
+
+        <!-- SECTION E: REQUEST TRACES -->
+        <section id="traces-tab" class="tab-content">
+            <div class="card glass-card">
+                <div class="card-header flex-between">
+                    <div>
+                        <h2>🔍 Request Trace System</h2>
+                        <p class="subtitle">Complete audit trail capturing request_id, role, steps pipeline, and timing.</p>
+                    </div>
+                    <button class="btn btn-secondary" onclick="loadTraces()">🔄 Refresh Traces</button>
                 </div>
                 <div class="table-responsive">
                     <table class="data-table">
                         <thead>
                             <tr>
                                 <th>Trace ID</th>
-                                <th>Attempted Patient</th>
-                                <th>Doctor Slot</th>
-                                <th>Timestamp</th>
-                                <th>Failure Reason</th>
-                                <th>Reviewer Explanation</th>
+                                <th>Request ID</th>
+                                <th>Role</th>
+                                <th>Mode</th>
+                                <th>Patient / Doctor</th>
+                                <th>Slot</th>
+                                <th>Transaction</th>
+                                <th>Latency</th>
+                                <th>Steps Flow</th>
+                                <th>Action</th>
                             </tr>
                         </thead>
-                        <tbody id="staffFailedTableBody">
+                        <tbody id="tracesTableBody">
                             <!-- Loaded dynamically -->
                         </tbody>
                     </table>
@@ -206,14 +321,77 @@
             </div>
         </section>
 
-        <!-- TAB 4: TEST HARNESS & METRICS DASHBOARD -->
-        <section id="dashboard-tab" class="tab-content">
+        <!-- SECTION F: RETRY EVENTS -->
+        <section id="retries-tab" class="tab-content">
+            <div class="card glass-card">
+                <div class="card-header flex-between">
+                    <div>
+                        <h2>🔄 Retry Event Tracking</h2>
+                        <p class="subtitle">Auditing client retry attempts, deduplication matches, and idempotency key hits.</p>
+                    </div>
+                    <button class="btn btn-secondary" onclick="loadRetryEvents()">🔄 Refresh Retries</button>
+                </div>
+                <div class="table-responsive">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Retry ID</th>
+                                <th>Request ID</th>
+                                <th>Original Req ID</th>
+                                <th>Attempt #</th>
+                                <th>Idempotency Key</th>
+                                <th>Retry Reason</th>
+                                <th>Result / Deduplication</th>
+                                <th>Timestamp</th>
+                            </tr>
+                        </thead>
+                        <tbody id="retryEventsTableBody">
+                            <!-- Loaded dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- SECTION G: TRANSACTION EVENTS -->
+        <section id="transactions-tab" class="tab-content">
+            <div class="card glass-card">
+                <div class="card-header flex-between">
+                    <div>
+                        <h2>💳 Transaction Boundaries & Events</h2>
+                        <p class="subtitle">Visibility into database TRANSACTION_BEGIN, TRANSACTION_COMMIT, and TRANSACTION_ROLLBACK events.</p>
+                    </div>
+                    <button class="btn btn-secondary" onclick="loadTransactionEvents()">🔄 Refresh Transactions</button>
+                </div>
+                <div class="table-responsive">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Request ID</th>
+                                <th>Mode</th>
+                                <th>Transaction Status</th>
+                                <th>Database Result</th>
+                                <th>Duplicate Detected</th>
+                                <th>Duplicate Prevented</th>
+                                <th>Lifecycle Steps Pipeline</th>
+                            </tr>
+                        </thead>
+                        <tbody id="transactionEventsTableBody">
+                            <!-- Loaded dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- SECTION H: VERIFICATION METRICS -->
+        <section id="metrics-tab" class="tab-content">
 
             <!-- Test Trigger Control Bar -->
             <div class="card glass-card highlight-card">
                 <div class="card-header">
-                    <h2>🧪 Concurrency & Retry Test Harness</h2>
-                    <p class="subtitle">Launch automated simulations to compare Baseline vs Protected Prototype under load.</p>
+                    <h2>🧪 Test Harness & Verification Suite</h2>
+                    <p class="subtitle">Launch automated test cases to compare Baseline vs Protected Prototype under load.</p>
                 </div>
                 <div class="test-controls-grid">
                     <button class="btn btn-outline" onclick="triggerTest('normal')">
@@ -239,9 +417,9 @@
                 <div class="card-header flex-between">
                     <div>
                         <h2>Measured Metrics Comparison</h2>
-                        <p class="subtitle">Real-time measured results: Baseline vs Protected Prototype.</p>
+                        <p class="subtitle">Real-time measured baseline vs protected results.</p>
                     </div>
-                    <span class="badge badge-info" id="lastUpdatedBadge">Live Database Metrics</span>
+                    <span class="badge badge-info">Live Database Metrics</span>
                 </div>
                 <div class="table-responsive">
                     <table class="metrics-table">
@@ -300,83 +478,52 @@
                     </table>
                 </div>
             </div>
-
-            <!-- Request Traces Table -->
-            <div class="card glass-card margin-top">
-                <div class="card-header flex-between">
-                    <div>
-                        <h2>Execution Request Traces</h2>
-                        <p class="subtitle">Complete millisecond audit log of every request execution.</p>
-                    </div>
-                    <div class="filters">
-                        <select id="traceFilterMode" onchange="loadTraces()">
-                            <option value="">All Modes</option>
-                            <option value="protected">Protected</option>
-                            <option value="baseline">Baseline</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="table-responsive">
-                    <table class="data-table" id="tracesTable">
-                        <thead>
-                            <tr>
-                                <th>Trace ID</th>
-                                <th>Mode</th>
-                                <th>Test Type</th>
-                                <th>Doctor Slot</th>
-                                <th>Idempotency Key</th>
-                                <th>Status</th>
-                                <th>DB Result</th>
-                                <th>Latency</th>
-                                <th>Explanation</th>
-                            </tr>
-                        </thead>
-                        <tbody id="tracesTableBody">
-                            <!-- Loaded dynamically -->
-                        </tbody>
-                    </table>
-                </div>
-            </div>
         </section>
 
-        <!-- TAB 5: SYSTEM RULES CONFIG -->
-        <section id="config-tab" class="tab-content">
-            <div class="card glass-card max-width-600">
+        <!-- SECTION I: DECISION EXPLANATIONS -->
+        <section id="explanation-tab" class="tab-content">
+            <div class="card glass-card">
                 <div class="card-header">
-                    <h2>Configurable Concurrency & Idempotency Rules</h2>
-                    <p class="subtitle">Dynamically adjust safety policies and simulated latencies.</p>
+                    <h2>💡 Decision Explanations & Fallback Inspector</h2>
+                    <p class="subtitle">Rule-based decision catalog and human-readable explanation inspector for non-specialists.</p>
                 </div>
-                <form id="configForm" onsubmit="handleConfigSubmit(event)">
-                    <div class="form-group">
-                        <label for="cfg_max_retries">MAX_RETRIES</label>
-                        <input type="number" id="cfg_max_retries" min="1" max="10">
+
+                <div class="grid-2col margin-top">
+                    <div class="card">
+                        <h3>Catalog of Explanation Rules</h3>
+                        <div class="explanation-rule-item">
+                            <span class="badge badge-success">CONFIRMED (SLOT_AVAILABLE)</span>
+                            <p>"Appointment confirmed because the requested slot was available."</p>
+                        </div>
+                        <div class="explanation-rule-item">
+                            <span class="badge badge-info">IDEMPOTENT (IDEMPOTENT_RETRY_MATCH)</span>
+                            <p>"This request was already processed. The existing appointment was returned instead of creating another record."</p>
+                        </div>
+                        <div class="explanation-rule-item">
+                            <span class="badge badge-warning">SLOT CONFLICT (SLOT_ALREADY_BOOKED)</span>
+                            <p>"The requested doctor/time slot is already booked."</p>
+                        </div>
+                        <div class="explanation-rule-item">
+                            <span class="badge badge-danger">CONCURRENCY CONFLICT (RACE_CONDITION_PREVENTED)</span>
+                            <p>"Another request reserved this slot first. This request was rejected to prevent double booking."</p>
+                        </div>
+                        <div class="explanation-rule-item">
+                            <span class="badge badge-danger">TRANSACTION FAILURE (TRANSACTION_ROLLED_BACK)</span>
+                            <p>"The appointment could not be safely completed. No inconsistent booking was created."</p>
+                        </div>
                     </div>
-                    <div class="form-group checkbox-group">
-                        <label>
-                            <input type="checkbox" id="cfg_enable_idempotency">
-                            ENABLE_IDEMPOTENCY (Return cached booking on retry)
-                        </label>
+
+                    <div class="card">
+                        <h3>Fallback Suggestions Workflow</h3>
+                        <p>When a booking is rejected due to a conflict, the system suggests alternate available slots:</p>
+                        <ul class="fallback-list">
+                            <li>Choose an alternative time for the requested doctor</li>
+                            <li>Choose an alternate doctor available on the same date</li>
+                            <li>Retry the request with a fresh key if appropriate</li>
+                            <li>Contact hospital reception staff</li>
+                        </ul>
                     </div>
-                    <div class="form-group checkbox-group">
-                        <label>
-                            <input type="checkbox" id="cfg_enable_concurrency">
-                            ENABLE_CONCURRENCY_PROTECTION (Database UNIQUE lock)
-                        </label>
-                    </div>
-                    <div class="form-group">
-                        <label for="cfg_policy">SLOT_CONFLICT_POLICY</label>
-                        <select id="cfg_policy">
-                            <option value="reject">reject (HTTP 409 Conflict)</option>
-                            <option value="queue">queue (Simulated waitlist)</option>
-                            <option value="log_only">log_only (Log warning)</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="cfg_delay">SIMULATED_PROCESSING_DELAY_MS (Race Window Width)</label>
-                        <input type="number" id="cfg_delay" min="0" max="500">
-                    </div>
-                    <button type="submit" class="btn btn-primary btn-block">Save Configuration</button>
-                </form>
+                </div>
             </div>
         </section>
 

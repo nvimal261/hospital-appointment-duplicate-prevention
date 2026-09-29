@@ -18,7 +18,7 @@ def get_db_connection() -> sqlite3.Connection:
     return conn
 
 def init_db():
-    """Initializes schema for baseline, protected, and trace audit tables."""
+    """Initializes schema for baseline, protected, trace audit, and retry tables."""
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
@@ -58,6 +58,7 @@ def init_db():
                 trace_id TEXT PRIMARY KEY,
                 request_id TEXT NOT NULL,
                 mode TEXT NOT NULL,
+                role TEXT DEFAULT 'Patient',
                 test_type TEXT NOT NULL,
                 idempotency_key TEXT,
                 patient_id TEXT NOT NULL,
@@ -71,7 +72,40 @@ def init_db():
                 success INTEGER NOT NULL,
                 response_status INTEGER NOT NULL,
                 database_result TEXT NOT NULL,
+                transaction_status TEXT DEFAULT 'COMMITTED',
+                duplicate_detected INTEGER DEFAULT 0,
+                duplicate_prevented INTEGER DEFAULT 0,
+                error_message TEXT DEFAULT '',
+                steps TEXT DEFAULT '',
                 explanation TEXT NOT NULL
+            );
+        """)
+
+        # Migration columns if table existed without new fields
+        for col_def in [
+            ("role", "TEXT DEFAULT 'Patient'"),
+            ("transaction_status", "TEXT DEFAULT 'COMMITTED'"),
+            ("duplicate_detected", "INTEGER DEFAULT 0"),
+            ("duplicate_prevented", "INTEGER DEFAULT 0"),
+            ("error_message", "TEXT DEFAULT ''"),
+            ("steps", "TEXT DEFAULT ''")
+        ]:
+            try:
+                cursor.execute(f"ALTER TABLE request_traces ADD COLUMN {col_def[0]} {col_def[1]};")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
+        # 4. Retry Events Tracking Table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS retry_events (
+                retry_id TEXT PRIMARY KEY,
+                request_id TEXT NOT NULL,
+                original_request_id TEXT,
+                retry_number INTEGER NOT NULL,
+                idempotency_key TEXT,
+                retry_reason TEXT,
+                timestamp TEXT NOT NULL,
+                result TEXT NOT NULL
             );
         """)
 
@@ -87,6 +121,7 @@ def reset_database():
         cursor.execute("DROP TABLE IF EXISTS baseline_appointments;")
         cursor.execute("DROP TABLE IF EXISTS protected_appointments;")
         cursor.execute("DROP TABLE IF EXISTS request_traces;")
+        cursor.execute("DROP TABLE IF EXISTS retry_events;")
         conn.commit()
     finally:
         conn.close()
@@ -99,15 +134,17 @@ def record_trace(trace_data: Dict[str, Any]):
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO request_traces (
-                trace_id, request_id, mode, test_type, idempotency_key,
+                trace_id, request_id, mode, role, test_type, idempotency_key,
                 patient_id, doctor_id, appointment_date, appointment_time,
                 request_start_time, request_end_time, duration_ms,
-                retry_number, success, response_status, database_result, explanation
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                retry_number, success, response_status, database_result,
+                transaction_status, duplicate_detected, duplicate_prevented, error_message, steps, explanation
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """, (
             trace_data["trace_id"],
             trace_data["request_id"],
             trace_data["mode"],
+            trace_data.get("role", "Patient"),
             trace_data["test_type"],
             trace_data.get("idempotency_key"),
             trace_data["patient_id"],
@@ -121,6 +158,11 @@ def record_trace(trace_data: Dict[str, Any]):
             1 if trace_data["success"] else 0,
             trace_data["response_status"],
             trace_data["database_result"],
+            trace_data.get("transaction_status", "COMMITTED"),
+            trace_data.get("duplicate_detected", 0),
+            trace_data.get("duplicate_prevented", 0),
+            trace_data.get("error_message", ""),
+            trace_data.get("steps", ""),
             trace_data["explanation"]
         ))
         conn.commit()
@@ -155,3 +197,15 @@ def fetch_all_traces(mode: Optional[str] = None) -> List[Dict[str, Any]]:
         return [dict(row) for row in cursor.fetchall()]
     finally:
         conn.close()
+
+def fetch_trace_by_id(identifier: str) -> Optional[Dict[str, Any]]:
+    """Retrieves a trace by trace_id or request_id."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM request_traces WHERE trace_id = ? OR request_id = ?;", (identifier, identifier))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+

@@ -1,116 +1,265 @@
-# SafeBook Hospital — Appointment Duplicate Prevention Platform
+# Hospital Appointment Platform: Idempotency + Concurrency Test Harness + Duplicate Record Prevention
 
-A lightweight, working prototype for a hospital appointment platform focused on **preventing duplicate appointment bookings** caused by request retries and concurrent race conditions.
-
----
-
-## 🎯 Project Objective
-
-When multiple appointment booking requests are submitted simultaneously or retried over unstable networks, standard check-then-insert backend logic often suffers from **Time-of-Check to Time-of-Use (TOCTOU)** race conditions, resulting in duplicate double-booked appointments.
-
-This prototype demonstrates how combining **Client Idempotency Keys**, **Atomic SQLite Transactions**, and **Database Unique Constraints** prevents double-booking while comparing measured results against an unprotected baseline approach.
+> **NEXT 35% IMPLEMENTATION DELIVERABLE**  
+> Prototype demonstrating strict concurrency control, idempotency key deduplication, request tracing, transaction boundary visibility, transparent non-specialist explanations, and multi-role capabilities.
 
 ---
 
-## 🏗️ System Architecture
+## 1. Project Overview & Architecture
 
-```text
-┌─────────────────────────────────────────────────────────────────┐
-│              Web Frontend (HTML5 / Vanilla JS / Glassmorphism)  │
-│          - Patient Booking Screen  - Appointment List           │
-│          - Staff Failed Audit      - Test Harness & Dashboard   │
-└────────────────────────────────┬────────────────────────────────┘
-                                 │ REST API (JSON)
-                                 ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                     Python FastAPI Backend                      │
-│   ┌──────────────────────────┐   ┌──────────────────────────┐   │
-│   │ Baseline Handler (Race) │   │ Protected Handler (Safe) │   │
-│   └────────────┬─────────────┘   └────────────┬─────────────┘   │
-└────────────────┼──────────────────────────────┼─────────────────┘
-                 │ Check & Widen Delay          │ Atomic Transaction
-                 ▼                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                  SQLite Database WAL Mode                       │
-│   - baseline_appointments (No UNIQUE Constraints)               │
-│   - protected_appointments (UNIQUE: Patient+Doctor+Date+Time)   │
-│   - request_traces (Millisecond Audit Log)                      │
-└─────────────────────────────────────────────────────────────────┘
+Hospital appointment booking platforms face critical concurrency challenges. When multiple patients simultaneously attempt to reserve the same doctor time slot (or when network retries resend identical requests), standard check-then-insert handlers create duplicate database records.
+
+This prototype provides an **empirical test harness and side-by-side comparative architecture**:
+* **Baseline Mode (Unprotected):** Vulnerable to Time-of-Check to Time-of-Use (TOCTOU) race conditions.
+* **Protected Prototype:** Employs SQLite WAL Immediate Write Transactions, Database `UNIQUE` constraints on `(doctor_id, appointment_date, appointment_time)` and `idempotency_key`, request tracing, transaction rollback visibility, and a rule-based explanation layer.
+
+```
+Incoming Request (Patient / Admin Role)
+            │
+            ▼
+┌───────────────────────────┐
+│     FastAPI Router        │ ──► [Request Tracer: REQ-PROT-XXXX]
+└─────────────┬─────────────┘
+              │
+              ├──► [Check MAX_RETRIES & Idempotency Key]
+              │          │
+              │          ├──► Match Found ──► Return Cached Booking (200 OK)
+              │
+              ▼
+┌───────────────────────────┐
+│  Immediate SQLite Lock    │ ──► [TRANSACTION_BEGIN]
+└─────────────┬─────────────┘
+              │
+              ├──► INSERT INTO protected_appointments (UNIQUE slot constraint)
+              │          │
+              │          ├──► Success ──────► [TRANSACTION_COMMIT] (200 OK)
+              │          └──► Constraint Violation (409) ──► [TRANSACTION_ROLLBACK]
+              ▼
+┌───────────────────────────┐
+│    Explanation Layer      │ ──► Human-readable rationale & Fallback suggestions
+└───────────────────────────┘
 ```
 
 ---
 
-## 🚀 Setup & Execution Instructions
+## 2. Multi-User Roles
+
+The platform implements two operational user roles accessible via the frontend role selector:
+
+1. **Patient Role:**
+   * Submit appointment booking requests.
+   * View booking response and human-readable explanation rationale.
+   * View personal appointment list (`Patient View`).
+   * Retry failed requests directly from the UI.
+   * View suggested alternative doctor/time slots if slot conflict occurs.
+
+2. **Hospital Staff / Admin Role:**
+   * Full visibility into all appointment records.
+   * Access to **Staff Audit & Control Center**.
+   * View duplicate prevention events, request traces, transaction events, and retry logs.
+   * Dynamically update system business rules configuration (`MAX_RETRIES`, `SLOT_CONFLICT_POLICY`, toggles).
+   * Execute automated test harness benchmarks.
+
+---
+
+## 3. Configurable Business Rules
+
+Business rules are managed dynamically via `GET /api/config` and `PUT /api/config`:
+
+* `MAX_RETRIES` (default: `3`): Maximum allowed retry attempts per idempotency key.
+* `ENABLE_IDEMPOTENCY` (default: `true`): Toggles idempotent deduplication lookup.
+* `ENABLE_CONCURRENCY_PROTECTION` (default: `true`): Toggles atomic database write locking.
+* `SLOT_CONFLICT_POLICY` (`"REJECT"`, `"RETRY"`, `"FALLBACK"`):
+  * `"REJECT"`: Returns HTTP 409 Conflict.
+  * `"RETRY"`: Recommends automated client retry.
+  * `"FALLBACK"`: Calculates and attaches available alternative doctor slots.
+* `ENABLE_REQUEST_TRACING` (default: `true`): Toggles request lifecycle tracing.
+* `ENABLE_EXPLANATION_LAYER` (default: `true`): Toggles transparent non-technical explanations.
+* `SIMULATED_PROCESSING_DELAY_MS` (default: `30`): Processing delay window to demonstrate baseline race window.
+
+---
+
+## 4. Request Tracing & Transaction Boundary Visibility
+
+Every booking request is assigned a unique `request_id` and tracked through explicit lifecycle steps:
+
+```
+REQUEST_RECEIVED ──► VALIDATION ──► IDEMPOTENCY_CHECK ──► SLOT_CHECK ──► TRANSACTION_BEGIN ──► DATABASE_OPERATION ──► TRANSACTION_COMMIT / ROLLBACK ──► RESPONSE_GENERATED
+```
+
+Each trace records:
+* `request_id`, `role`, `mode`, `patient_id`, `doctor_id`, `appointment_date`, `appointment_time`
+* `transaction_status`: `COMMITTED`, `ROLLED_BACK`, or `REJECTED`
+* `duplicate_detected`, `duplicate_prevented` flags
+* Processing duration in milliseconds and execution steps pipeline.
+
+---
+
+## 5. Non-Technical Explanation & Fallback Layer
+
+Every appointment response includes a transparent, rule-based explanation layer:
+
+* **CONFIRMED:** *"Appointment confirmed because the requested slot was available."*
+* **IDEMPOTENT RETRY:** *"This request was already processed. The existing appointment was returned instead of creating another record."*
+* **SLOT CONFLICT:** *"The requested doctor/time slot is already booked."*
+* **CONCURRENCY CONFLICT:** *"Another request reserved this slot first. This request was rejected to prevent double booking."*
+* **FALLBACK WORKFLOW:** Returns alternative available slots (e.g., `DOC-CARDIOLOGY-01 @ 11:30`) and recommended next steps without automatically forcing an unconfirmed booking.
+
+---
+
+## 6. API Integration Examples
+
+### 6.1 Book Appointment (`POST /api/appointments/book` or `/api/appointments`)
+**Request:**
+```json
+POST /api/appointments/book?mode=protected
+Content-Type: application/json
+
+{
+  "patient_id": "P-101",
+  "doctor_id": "DOC-CARDIOLOGY-01",
+  "appointment_date": "2026-11-01",
+  "appointment_time": "09:00",
+  "idempotency_key": "IDEM-KEY-A1B2C3",
+  "retry_number": 0,
+  "role": "Patient"
+}
+```
+
+**Response (HTTP 200 OK):**
+```json
+{
+  "appointment_id": "APP-PROT-7AAFC762",
+  "patient_id": "P-101",
+  "doctor_id": "DOC-CARDIOLOGY-01",
+  "appointment_date": "2026-11-01",
+  "appointment_time": "09:00",
+  "idempotency_key": "IDEM-KEY-A1B2C3",
+  "booking_status": "CONFIRMED",
+  "mode": "protected",
+  "created_at": "2026-09-29T11:48:00.123456",
+  "message": "Appointment successfully booked.",
+  "request_id": "REQ-PROT-89ABCDEF",
+  "status": "CONFIRMED",
+  "reason_code": "SLOT_AVAILABLE",
+  "human_readable_explanation": "Appointment confirmed because the requested doctor slot was available.",
+  "fallback_actions": [],
+  "alternative_slots": []
+}
+```
+
+### 6.2 Retrieve Specific Trace (`GET /api/traces/{request_id}`)
+**Response:**
+```json
+{
+  "trace_id": "TR-12345678",
+  "request_id": "REQ-PROT-89ABCDEF",
+  "mode": "protected",
+  "role": "Patient",
+  "test_type": "manual",
+  "idempotency_key": "IDEM-KEY-A1B2C3",
+  "patient_id": "P-101",
+  "doctor_id": "DOC-CARDIOLOGY-01",
+  "appointment_date": "2026-11-01",
+  "appointment_time": "09:00",
+  "duration_ms": 14.5,
+  "success": 1,
+  "response_status": 200,
+  "database_result": "INSERTED",
+  "transaction_status": "COMMITTED",
+  "steps": "REQUEST_RECEIVED -> VALIDATION -> IDEMPOTENCY_CHECK -> SLOT_CHECK -> TRANSACTION_BEGIN -> DATABASE_OPERATION -> TRANSACTION_COMMIT -> RESPONSE_GENERATED",
+  "explanation": "Protected booking created appointment APP-PROT-7AAFC762 successfully."
+}
+```
+
+### 6.3 Read System Configuration (`GET /api/config`)
+**Response:**
+```json
+{
+  "MAX_RETRIES": 3,
+  "ENABLE_IDEMPOTENCY": true,
+  "ENABLE_CONCURRENCY_PROTECTION": true,
+  "SLOT_CONFLICT_POLICY": "FALLBACK",
+  "ENABLE_REQUEST_TRACING": true,
+  "ENABLE_EXPLANATION_LAYER": true,
+  "SIMULATED_PROCESSING_DELAY_MS": 30
+}
+```
+
+### 6.4 Additional Available Endpoints
+* `GET /api/appointments/{appointment_id}`
+* `GET /api/retries/{request_id}`
+* `GET /api/metrics`
+* `PUT /api/config`
+* `GET /api/validation/results`
+
+---
+
+## 7. Measured Verification Results
+
+### Baseline vs Protected Prototype Comparison (60-Item Benchmark)
+
+| Metric Description | Baseline Mode | Protected Prototype |
+| :--- | :--- | :--- |
+| **Total Requests Executed** | 60 | 60 |
+| **Successful Confirmed Bookings** | 50 | 42 |
+| **Duplicate Records Created in DB** | **18** | **0** |
+| **Duplicate Records Prevented** | 10 | 28 |
+| **Retry Requests Processed** | 15 | 15 |
+| **Concurrent Race Attempts** | 20 | 20 |
+| **Failed / Rejected Requests** | 10 | 18 |
+| **DUPLICATE PREVENTION RATE (%)** | **35.7%** | **100.0%** |
+
+### Next Phase Validation Results (10 Validation Categories)
+
+```
+==================================================
+NEXT PHASE VERIFICATION
+==================================================
+Total validation cases: 10
+Passed: 10
+Failed: 0
+
+Retry scenarios: 3
+Concurrent scenarios: 2
+Duplicate scenarios: 3
+Validation errors: 2
+Transaction rollbacks: 2
+Fallback responses: 3
+
+Duplicate records: 0
+Duplicate prevention rate: 100.0%
+==================================================
+```
+
+---
+
+## 8. Limitations & Future Scope
+
+1. **Local SQLite Storage:** Designed for local prototype verification; multi-region production systems require PostgreSQL with Serializable isolation.
+2. **In-Memory Configuration:** Config updates apply globally to the active process.
+3. **Authentication:** Uses simple frontend role selectors suitable for reviewer demonstration.
+
+---
+
+## 9. How to Run the Application & Verification Suite
 
 ### Prerequisites
-- Python 3.10+ installed on system.
+* Python 3.9+
+* Required packages listed in `requirements.txt` (`fastapi`, `uvicorn`, `httpx`, `pydantic`)
 
-### 1. Installation
-Clone/extract project repository into local workspace directory and install dependencies:
+### Installation
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. Run Backend & Frontend (Single Command)
-Start the FastAPI server via Uvicorn:
+### Run Web Application
 ```bash
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+python -m uvicorn app.main:app --reload --port 8000
 ```
-or run directly:
+Open browser at: `http://127.0.0.1:8000`
+
+### Run Complete Verification Suite
 ```bash
-python -m app.main
+python run_verification_suite.py
 ```
-
-### 3. Access Web Interface
-Open your web browser and navigate to:
-```text
-http://127.0.0.1:8000
-```
-
----
-
-## 🧪 How to Run Automated Concurrency & Retry Tests
-
-### Option A: From Web Interface Dashboard
-1. Open `http://127.0.0.1:8000` and click the **📊 Test Harness & Metrics** tab.
-2. Click **Test 1: Normal Single Request** — Sends 1 request.
-3. Click **Test 2: 3x Retry Simulation** — Sends the same request 3 times with identical `idempotency_key`.
-4. Click **Test 3: 10x Concurrent Race Condition** — Sends 10 simultaneous requests targeting the identical doctor slot.
-5. Click **Test 4: Run 60-Item Synthetic Benchmark** — Executes full dataset benchmark comparing Baseline vs Protected prototype.
-6. Inspect measured metrics in side-by-side comparison table and click **💡 Explain** on any trace for non-technical breakdown.
-
-### Option B: Direct API Curl Command
-Run a 10x concurrent test via curl:
-```bash
-curl -X POST "http://127.0.0.1:8000/api/tests/concurrent?mode=protected&count=10" \
-     -H "Content-Type: application/json" \
-     -d "{\"patient_id\":\"P-999\",\"doctor_id\":\"DOC-CARDIOLOGY-01\",\"appointment_date\":\"2026-09-30\",\"appointment_time\":\"10:00\",\"idempotency_key\":\"IDEM-CLI-100\"}"
-```
-
----
-
-## 💡 Idempotency & Concurrency Protection Explained
-
-### 1. What is Idempotency?
-An operation is **idempotent** if executing it multiple times produces the exact same outcome as executing it once.
-- **Problem**: On slow mobile networks, a patient clicks "Book", the backend creates the appointment, but the response drops. The client retries. Without idempotency, a second appointment row is created!
-- **Protected Solution**: Each request carries a unique `idempotency_key`. The backend checks if this key was already processed. If found, it returns the cached existing appointment without inserting a duplicate.
-
-### 2. How Concurrency Protection Works
-- **Baseline Flaw**:
-  ```text
-  Request A → Check Slot (Free) ───────> Insert Appointment
-  Request B → Check Slot (Free) ───────> Insert Appointment  <-- DOUBLE BOOKING!
-  ```
-- **Protected Implementation**:
-  ```text
-  Request A & B → SQLite BEGIN IMMEDIATE TRANSACTION
-  Request A → INSERT INTO protected_appointments (UNIQUE constraint) → SUCCEEDED (200 OK)
-  Request B → INSERT INTO protected_appointments (UNIQUE constraint) → IntegrityError Caught → REJECTED (409 Conflict)
-  ```
-
----
-
-## 📊 Measured Prevention Rate Formula
-
-$$\text{Duplicate Prevention Rate (\%)} = \left( \frac{\text{Duplicates Prevented}}{\text{Duplicates Prevented} + \text{Duplicate Records Created}} \right) \times 100$$

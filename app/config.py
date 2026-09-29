@@ -9,7 +9,9 @@ class SystemConfig(BaseModel):
     MAX_RETRIES: int = 3
     ENABLE_IDEMPOTENCY: bool = True
     ENABLE_CONCURRENCY_PROTECTION: bool = True
-    SLOT_CONFLICT_POLICY: Literal["reject", "queue", "log_only"] = "reject"
+    SLOT_CONFLICT_POLICY: str = "REJECT"  # REJECT, RETRY, FALLBACK
+    ENABLE_REQUEST_TRACING: bool = True
+    ENABLE_EXPLANATION_LAYER: bool = True
     SIMULATED_PROCESSING_DELAY_MS: int = 30  # Processing delay to demonstrate baseline race window
 
 # Global active configuration instance
@@ -22,3 +24,4 @@ def update_config(new_config: SystemConfig) -> SystemConfig:
     global active_config
     active_config = new_config
     return active_config
+

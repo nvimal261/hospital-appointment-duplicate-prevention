@@ -23,6 +23,9 @@ async def handle_baseline_booking(request_data: AppointmentCreate, test_type: st
     config = get_config()
     start_time = time.time()
     req_id = f"REQ-BASE-{uuid.uuid4().hex[:8].upper()}"
+    role = getattr(request_data, "role", "Patient") or "Patient"
+
+    steps = ["REQUEST_RECEIVED", "VALIDATION", "SLOT_CHECK"]
 
     # Connect to SQLite
     conn = get_db_connection()
@@ -48,7 +51,10 @@ async def handle_baseline_booking(request_data: AppointmentCreate, test_type: st
         duration_ms = round((end_time - start_time) * 1000, 2)
 
         if existing_slot:
+            steps.extend(["TRANSACTION_BEGIN", "TRANSACTION_ROLLBACK", "RESPONSE_GENERATED"])
             # Slot was found during initial check
+            explanation_msg = f"Baseline check found slot already taken for {request_data.doctor_id} on {request_data.appointment_date} {request_data.appointment_time}."
+            
             response_payload = {
                 "appointment_id": existing_slot["appointment_id"],
                 "patient_id": existing_slot["patient_id"],
@@ -59,12 +65,21 @@ async def handle_baseline_booking(request_data: AppointmentCreate, test_type: st
                 "booking_status": "REJECTED",
                 "mode": "baseline",
                 "created_at": existing_slot["created_at"],
-                "message": "Appointment slot is already booked."
+                "message": "Appointment slot is already booked.",
+                "request_id": req_id,
+                "status": "REJECTED",
+                "reason_code": "SLOT_ALREADY_BOOKED",
+                "human_readable_explanation": explanation_msg,
+                "fallback_actions": [
+                    "Choose an alternative date/time.",
+                    "Select a different doctor."
+                ]
             }
             trace_info = {
                 "trace_id": f"TR-{uuid.uuid4().hex[:8]}",
                 "request_id": req_id,
                 "mode": "baseline",
+                "role": role,
                 "test_type": test_type,
                 "idempotency_key": request_data.idempotency_key,
                 "patient_id": request_data.patient_id,
@@ -78,11 +93,17 @@ async def handle_baseline_booking(request_data: AppointmentCreate, test_type: st
                 "success": False,
                 "response_status": 409,
                 "database_result": "SLOT_CONFLICT_REJECTED",
-                "explanation": f"Baseline check found slot already taken for {request_data.doctor_id} on {request_data.appointment_date} {request_data.appointment_time}."
+                "transaction_status": "REJECTED",
+                "duplicate_detected": 0,
+                "duplicate_prevented": 0,
+                "error_message": "Slot already taken in baseline check",
+                "steps": " -> ".join(steps),
+                "explanation": explanation_msg
             }
             return 409, response_payload, trace_info
 
         # Step 3: Slot appeared available during check, so insert new appointment
+        steps.extend(["TRANSACTION_BEGIN", "DATABASE_OPERATION", "TRANSACTION_COMMIT", "RESPONSE_GENERATED"])
         new_app_id = f"APP-BASE-{uuid.uuid4().hex[:8].upper()}"
         created_at = datetime.now().isoformat()
 
@@ -131,13 +152,18 @@ async def handle_baseline_booking(request_data: AppointmentCreate, test_type: st
             "booking_status": "CONFIRMED",
             "mode": "baseline",
             "created_at": created_at,
-            "message": "Appointment successfully booked (Baseline Mode)."
+            "message": "Appointment successfully booked (Baseline Mode).",
+            "request_id": req_id,
+            "status": "CONFIRMED",
+            "reason_code": "RACE_CONDITION_UNPROTECTED" if dup_count > 1 else "SLOT_AVAILABLE",
+            "human_readable_explanation": explanation
         }
 
         trace_info = {
             "trace_id": f"TR-{uuid.uuid4().hex[:8]}",
             "request_id": req_id,
             "mode": "baseline",
+            "role": role,
             "test_type": test_type,
             "idempotency_key": request_data.idempotency_key,
             "patient_id": request_data.patient_id,
@@ -151,6 +177,11 @@ async def handle_baseline_booking(request_data: AppointmentCreate, test_type: st
             "success": True,
             "response_status": 200 if dup_count == 1 else 201,
             "database_result": db_result,
+            "transaction_status": "COMMITTED",
+            "duplicate_detected": 1 if dup_count > 1 else 0,
+            "duplicate_prevented": 0,
+            "error_message": "",
+            "steps": " -> ".join(steps),
             "explanation": explanation
         }
 
@@ -158,3 +189,4 @@ async def handle_baseline_booking(request_data: AppointmentCreate, test_type: st
 
     finally:
         conn.close()
+

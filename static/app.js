@@ -2,6 +2,8 @@
  * Hospital Appointment Duplicate Prevention Platform - Frontend Logic
  */
 
+let activeRole = "patient";
+
 // Initialize default values on page load
 document.addEventListener("DOMContentLoaded", () => {
     // Set default date to tomorrow
@@ -12,23 +14,35 @@ document.addEventListener("DOMContentLoaded", () => {
     // Auto generate initial idempotency key
     generateIdempotencyKey();
 
+    // Initial role setup
+    switchRole("patient");
+
     // Initial data fetch
-    loadAppointments();
     loadDashboardMetrics();
     loadConfig();
 });
 
 // --- Role Switcher ---
 function switchRole(role) {
-    const staffNav = document.getElementById("staff-attempts-nav");
+    activeRole = role;
+    const badge = document.getElementById("roleBadge");
+    const adminTabs = document.querySelectorAll(".admin-only");
+
     if (role === "staff") {
-        staffNav.style.display = "inline-block";
-        loadStaffFailedAttempts();
+        badge.innerText = "Role: Hospital Staff / Admin";
+        badge.className = "role-badge badge-staff";
+        adminTabs.forEach(el => el.style.display = "inline-block");
+        loadStaffView();
     } else {
-        staffNav.style.display = "none";
-        if (document.getElementById("staff-attempts-tab").classList.contains("active")) {
+        badge.innerText = "Role: Patient";
+        badge.className = "role-badge badge-patient";
+        adminTabs.forEach(el => el.style.display = "none");
+        // If currently on an admin tab, switch back to booking tab
+        const activeTabEl = document.querySelector(".tab-content.active");
+        if (activeTabEl && activeTabEl.classList.contains("admin-only")) {
             switchTab("booking-tab");
         }
+        loadPatientAppointments();
     }
 }
 
@@ -45,9 +59,12 @@ function switchTab(tabId) {
     if (activeBtn) activeBtn.classList.add("active");
 
     // Refresh tab data
-    if (tabId === "appointments-tab") loadAppointments();
-    if (tabId === "staff-attempts-tab") loadStaffFailedAttempts();
-    if (tabId === "dashboard-tab") loadDashboardMetrics();
+    if (tabId === "patient-tab") loadPatientAppointments();
+    if (tabId === "staff-tab") loadStaffView();
+    if (tabId === "traces-tab") loadTraces();
+    if (tabId === "retries-tab") loadRetryEvents();
+    if (tabId === "transactions-tab") loadTransactionEvents();
+    if (tabId === "metrics-tab") loadDashboardMetrics();
     if (tabId === "config-tab") loadConfig();
 }
 
@@ -74,7 +91,8 @@ async function handleBookingSubmit(event) {
         appointment_date: document.getElementById("appointment_date").value,
         appointment_time: document.getElementById("appointment_time").value,
         idempotency_key: document.getElementById("idempotency_key").value.trim() || null,
-        retry_number: 0
+        retry_number: 0,
+        role: activeRole === "staff" ? "Hospital Staff" : "Patient"
     };
 
     try {
@@ -86,7 +104,6 @@ async function handleBookingSubmit(event) {
 
         const data = await response.json();
         renderBookingResult(response.status, data, mode, payload.idempotency_key);
-        loadAppointments();
         loadDashboardMetrics();
     } catch (err) {
         alert("Failed to connect to backend server: " + err.message);
@@ -96,24 +113,41 @@ async function handleBookingSubmit(event) {
     }
 }
 
-// --- Render Booking Result & Explanation ---
+// --- Render Booking Result & Rationale ---
 function renderBookingResult(status, data, mode, key) {
     document.getElementById("bookingResultPlaceholder").style.display = "none";
     const resultCard = document.getElementById("bookingResultCard");
     resultCard.style.display = "block";
 
     let bannerClass = status === 200 || status === 201 ? "banner-success" : (status === 409 ? "banner-rejected" : "banner-danger");
-    let statusTitle = status === 200 || status === 201 ? "CONFIRMED" : (status === 409 ? "REJECTED (SLOT BOOKED)" : "FAILED");
+    let statusTitle = data.booking_status || (status === 200 || status === 201 ? "CONFIRMED" : (status === 409 ? "REJECTED (SLOT BOOKED)" : "FAILED"));
 
-    let explanationText = "";
-    if (data.message && data.message.includes("idempotency")) {
-        explanationText = `🔁 <strong>Idempotency Key Active:</strong> The system recognized key <code>${key}</code> as a request retry. Instead of creating a duplicate appointment, it safely returned the existing confirmed appointment record.`;
-    } else if (status === 409) {
-        explanationText = `🛡️ <strong>Concurrency Conflict Prevented:</strong> Another request reserved this exact doctor slot. The database UNIQUE constraint blocked this duplicate booking request.`;
-    } else if (mode === "baseline") {
-        explanationText = `⚠️ <strong>Baseline Mode:</strong> Request checked slot availability and inserted appointment <code>${data.appointment_id}</code>. Warning: Simultaneous concurrent requests in baseline mode can bypass this check and cause double-bookings!`;
-    } else {
-        explanationText = `✅ <strong>Protected Booking Confirmed:</strong> Slot successfully locked for appointment <code>${data.appointment_id}</code> under strict concurrency control.`;
+    let fallbackHtml = "";
+    if (data.alternative_slots && data.alternative_slots.length > 0) {
+        fallbackHtml = `
+            <div class="fallback-box">
+                <strong>💡 Available Alternative Slots (Fallback Suggestion):</strong>
+                <div class="fallback-slots-list margin-top">
+                    ${data.alternative_slots.map(s => `
+                        <button class="btn btn-secondary btn-sm" onclick="selectAlternateSlot('${s.doctor_id}', '${s.appointment_date}', '${s.appointment_time}')">
+                            ${s.doctor_id} @ ${s.appointment_time}
+                        </button>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    let actionsHtml = "";
+    if (data.fallback_actions && data.fallback_actions.length > 0) {
+        actionsHtml = `
+            <div class="margin-top">
+                <small><strong>Suggested Next Steps:</strong></small>
+                <ul style="margin-top:4px; padding-left:18px; font-size:0.85rem; color:var(--text-muted);">
+                    ${data.fallback_actions.map(a => `<li>${a}</li>`).join('')}
+                </ul>
+            </div>
+        `;
     }
 
     resultCard.innerHTML = `
@@ -121,50 +155,106 @@ function renderBookingResult(status, data, mode, key) {
             <span>Status: ${statusTitle} (HTTP ${status})</span>
             <span class="badge ${mode === 'protected' ? 'badge-success' : 'badge-warning'}">${mode.toUpperCase()} MODE</span>
         </div>
-        <p><strong>Appointment ID:</strong> <code>${data.appointment_id || 'N/A'}</code></p>
+        <p><strong>Request ID:</strong> <code>${data.request_id || 'REQ-N/A'}</code></p>
+        <p><strong>Appointment ID:</strong> <code>${data.appointment_id || 'None'}</code></p>
         <p><strong>Patient ID:</strong> ${data.patient_id}</p>
         <p><strong>Doctor Slot:</strong> ${data.doctor_id} @ ${data.appointment_date} ${data.appointment_time}</p>
-        <p><strong>Idempotency Key:</strong> <code>${data.idempotency_key || 'None'}</code></p>
+        <p><strong>Reason Code:</strong> <code>${data.reason_code || 'N/A'}</code></p>
         <p><strong>Message:</strong> ${data.message || 'Processed'}</p>
 
         <div class="explanation-box">
-            <div class="explanation-title">Non-Technical Hospital Reviewer Explanation</div>
-            <p>${explanationText}</p>
+            <div class="explanation-title">Human-Readable Explanation (Non-Specialist View)</div>
+            <p>${data.human_readable_explanation || data.message || 'No specific explanation provided.'}</p>
+            ${actionsHtml}
         </div>
+
+        ${fallbackHtml}
     `;
 }
 
-// --- Load Confirmed Appointments Table ---
-async function loadAppointments() {
-    const mode = document.getElementById("appFilterMode").value;
-    try {
-        const res = await fetch(`/api/appointments?${mode ? 'mode=' + mode : ''}`);
-        const appointments = await res.json();
+function selectAlternateSlot(docId, dateStr, timeStr) {
+    document.getElementById("doctor_id").value = docId;
+    document.getElementById("appointment_date").value = dateStr;
+    document.getElementById("appointment_time").value = timeStr;
+    generateIdempotencyKey();
+    alert(`Updated slot to ${docId} @ ${dateStr} ${timeStr}. Click Submit to book!`);
+}
 
-        const tbody = document.getElementById("appointmentsTableBody");
+// --- Load Patient View Appointments ---
+async function loadPatientAppointments() {
+    try {
+        const res = await fetch("/api/traces");
+        const traces = await res.json();
+
+        const tbody = document.getElementById("patientAppointmentsBody");
         tbody.innerHTML = "";
 
-        if (appointments.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--text-muted);">No appointments booked yet.</td></tr>`;
+        if (traces.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--text-muted);">No appointment requests recorded for patient.</td></tr>`;
             return;
         }
 
-        // Count slot duplicates to highlight
-        const slotCounts = {};
-        appointments.forEach(a => {
-            if (a.booking_status === "CONFIRMED") {
-                const k = `${a.patient_id}|${a.doctor_id}|${a.appointment_date}|${a.appointment_time}`;
-                slotCounts[k] = (slotCounts[k] || 0) + 1;
-            }
-        });
-
-        appointments.forEach(app => {
-            const slotKey = `${app.patient_id}|${app.doctor_id}|${app.appointment_date}|${app.appointment_time}`;
-            const isDup = slotCounts[slotKey] > 1;
-
+        traces.slice(0, 20).forEach(t => {
             const tr = document.createElement("tr");
-            if (isDup) tr.classList.add("highlight-row-danger");
+            const isConfirmed = t.database_result === "INSERTED" || t.database_result === "RETURNED_IDEMPOTENT" || t.response_status === 200;
+            
+            tr.innerHTML = `
+                <td><code>${t.request_id}</code></td>
+                <td>${t.doctor_id}</td>
+                <td>${t.appointment_date} ${t.appointment_time}</td>
+                <td><span class="badge ${isConfirmed ? 'badge-success' : 'badge-danger'}">${isConfirmed ? 'CONFIRMED' : 'REJECTED'}</span></td>
+                <td><code>${t.database_result}</code></td>
+                <td>${t.explanation}</td>
+                <td>
+                    ${!isConfirmed ? `
+                        <button class="btn btn-secondary btn-sm" onclick="retryAppointment('${t.patient_id}', '${t.doctor_id}', '${t.appointment_date}', '${t.appointment_time}', '${t.idempotency_key}')">
+                            🔄 Retry Request
+                        </button>
+                    ` : '<span class="text-success">Confirmed</span>'}
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+    } catch (err) {
+        console.error("Error loading patient appointments:", err);
+    }
+}
 
+function retryAppointment(patId, docId, dateStr, timeStr, oldKey) {
+    switchTab("booking-tab");
+    document.getElementById("patient_id").value = patId;
+    document.getElementById("doctor_id").value = docId;
+    document.getElementById("appointment_date").value = dateStr;
+    document.getElementById("appointment_time").value = timeStr;
+    document.getElementById("idempotency_key").value = oldKey || `IDEM-RETRY-${Date.now()}`;
+    alert("Loaded request details into Booking Form. Click 'Submit Booking Request' to execute retry.");
+}
+
+// --- Load Staff/Admin View ---
+async function loadStaffView() {
+    const filter = document.getElementById("staffFilterMode").value;
+    try {
+        const resApps = await fetch(`/api/appointments${filter ? '?mode=' + filter : ''}`);
+        const apps = await resApps.json();
+
+        const resMetrics = await fetch("/api/metrics");
+        const metrics = await resMetrics.json();
+        const p = metrics.protected || {};
+
+        document.getElementById("staff-total-apps").innerText = apps.length;
+        document.getElementById("staff-prevented-count").innerText = p.duplicate_records_prevented || 0;
+        document.getElementById("staff-prevention-rate").innerText = `${(p.prevention_rate_percent || 100.0).toFixed(1)}%`;
+
+        const tbody = document.getElementById("staffAppointmentsTableBody");
+        tbody.innerHTML = "";
+
+        if (apps.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--text-muted);">No stored appointment records found.</td></tr>`;
+            return;
+        }
+
+        apps.forEach(app => {
+            const tr = document.createElement("tr");
             tr.innerHTML = `
                 <td><code>${app.appointment_id}</code></td>
                 <td>${app.patient_id}</td>
@@ -172,48 +262,116 @@ async function loadAppointments() {
                 <td>${app.appointment_date} ${app.appointment_time}</td>
                 <td><code>${app.idempotency_key || '-'}</code></td>
                 <td><span class="badge ${app.mode === 'protected' ? 'badge-info' : 'badge-warning'}">${app.mode}</span></td>
-                <td>
-                    <span class="badge ${app.booking_status === 'CONFIRMED' ? 'badge-success' : 'badge-danger'}">${app.booking_status}</span>
-                    ${isDup ? '<span class="badge badge-danger">⚠️ DUPLICATE ROW!</span>' : ''}
-                </td>
+                <td><span class="badge ${app.booking_status === 'CONFIRMED' ? 'badge-success' : 'badge-danger'}">${app.booking_status}</span></td>
                 <td>${new Date(app.created_at).toLocaleTimeString()}</td>
             `;
             tbody.appendChild(tr);
         });
     } catch (err) {
-        console.error("Error loading appointments:", err);
+        console.error("Error loading staff view:", err);
     }
 }
 
-// --- Load Staff Failed Attempts Audit ---
-async function loadStaffFailedAttempts() {
+// --- Load Request Traces ---
+async function loadTraces() {
     try {
-        const res = await fetch("/api/tests/results");
-        const data = await res.json();
-        const failedTraces = (data.traces || []).filter(t => !t.success || t.response_status >= 400 || t.database_result === "SLOT_CONFLICT_REJECTED");
+        const res = await fetch("/api/traces");
+        const traces = await res.json();
 
-        const tbody = document.getElementById("staffFailedTableBody");
+        const tbody = document.getElementById("tracesTableBody");
         tbody.innerHTML = "";
 
-        if (failedTraces.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--text-muted);">No failed or rejected booking attempts recorded.</td></tr>`;
+        if (traces.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:var(--text-muted);">No request traces recorded. Run test harness to generate traces.</td></tr>`;
             return;
         }
 
-        failedTraces.forEach(t => {
+        traces.forEach(t => {
             const tr = document.createElement("tr");
             tr.innerHTML = `
                 <td><code>${t.trace_id}</code></td>
-                <td>${t.patient_id}</td>
-                <td>${t.doctor_id} @ ${t.appointment_date} ${t.appointment_time}</td>
-                <td>${new Date(t.request_start_time * 1000).toLocaleTimeString()}</td>
-                <td><span class="badge badge-warning">${t.database_result}</span></td>
-                <td>${t.explanation}</td>
+                <td><code>${t.request_id}</code></td>
+                <td><span class="badge badge-info">${t.role || 'Patient'}</span></td>
+                <td><span class="badge ${t.mode === 'protected' ? 'badge-success' : 'badge-warning'}">${t.mode}</span></td>
+                <td>${t.patient_id} / ${t.doctor_id}</td>
+                <td>${t.appointment_date} ${t.appointment_time}</td>
+                <td><span class="badge ${t.transaction_status === 'COMMITTED' ? 'badge-success' : 'badge-danger'}">${t.transaction_status || 'COMMITTED'}</span></td>
+                <td>${t.duration_ms} ms</td>
+                <td><small><code>${t.steps || 'REQUEST_RECEIVED'}</code></small></td>
+                <td>
+                    <button class="btn btn-secondary btn-sm" onclick="openExplanationModal('${t.trace_id}')">💡 Explain</button>
+                </td>
+            `;
+            tr.dataset.traceObj = JSON.stringify(t);
+            tbody.appendChild(tr);
+        });
+    } catch (err) {
+        console.error("Error loading traces:", err);
+    }
+}
+
+// --- Load Retry Events ---
+async function loadRetryEvents() {
+    try {
+        const res = await fetch("/api/retries");
+        const retries = await res.json();
+
+        const tbody = document.getElementById("retryEventsTableBody");
+        tbody.innerHTML = "";
+
+        if (retries.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--text-muted);">No retry events recorded yet.</td></tr>`;
+            return;
+        }
+
+        retries.forEach(r => {
+            const tr = document.createElement("tr");
+            tr.innerHTML = `
+                <td><code>${r.retry_id}</code></td>
+                <td><code>${r.request_id}</code></td>
+                <td><code>${r.original_request_id || '-'}</code></td>
+                <td><span class="badge badge-info">Attempt #${r.retry_number}</span></td>
+                <td><code>${r.idempotency_key || '-'}</code></td>
+                <td>${r.retry_reason}</td>
+                <td>${r.result}</td>
+                <td>${new Date(r.timestamp).toLocaleTimeString()}</td>
             `;
             tbody.appendChild(tr);
         });
     } catch (err) {
-        console.error("Error loading staff attempts:", err);
+        console.error("Error loading retry events:", err);
+    }
+}
+
+// --- Load Transaction Events ---
+async function loadTransactionEvents() {
+    try {
+        const res = await fetch("/api/traces");
+        const traces = await res.json();
+
+        const tbody = document.getElementById("transactionEventsTableBody");
+        tbody.innerHTML = "";
+
+        if (traces.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--text-muted);">No transaction events recorded.</td></tr>`;
+            return;
+        }
+
+        traces.forEach(t => {
+            const tr = document.createElement("tr");
+            tr.innerHTML = `
+                <td><code>${t.request_id}</code></td>
+                <td><span class="badge ${t.mode === 'protected' ? 'badge-info' : 'badge-warning'}">${t.mode}</span></td>
+                <td><span class="badge ${t.transaction_status === 'COMMITTED' ? 'badge-success' : 'badge-danger'}">${t.transaction_status || 'COMMITTED'}</span></td>
+                <td><code>${t.database_result}</code></td>
+                <td>${t.duplicate_detected ? '⚠️ Yes' : 'No'}</td>
+                <td>${t.duplicate_prevented ? '🛡️ Yes' : 'No'}</td>
+                <td><code>${t.steps || 'REQUEST_RECEIVED -> TRANSACTION_COMMIT'}</code></td>
+            `;
+            tbody.appendChild(tr);
+        });
+    } catch (err) {
+        console.error("Error loading transaction events:", err);
     }
 }
 
@@ -224,7 +382,8 @@ async function triggerTest(type) {
         doctor_id: "DOC-CARDIOLOGY-01",
         appointment_date: "2026-09-30",
         appointment_time: "10:00",
-        idempotency_key: `IDEM-TEST-${Date.now()}`
+        idempotency_key: `IDEM-TEST-${Date.now()}`,
+        role: activeRole === "staff" ? "Hospital Staff" : "Patient"
     };
 
     if (type === 'normal') {
@@ -243,7 +402,6 @@ async function triggerTest(type) {
         });
     } else if (type === 'concurrent') {
         alert("Running Test Case 3: Launching 10 concurrent requests for exact same slot simultaneously across both Baseline & Protected modes...");
-        // Run baseline first to show race condition, then protected
         await fetch("/api/tests/concurrent?mode=baseline&count=10", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -260,24 +418,20 @@ async function triggerTest(type) {
     }
 
     loadDashboardMetrics();
-    loadAppointments();
 }
 
 async function resetAllData() {
     if (confirm("Reset all stored appointments and test traces?")) {
         await fetch("/api/tests/reset", { method: "POST" });
         loadDashboardMetrics();
-        loadAppointments();
-        loadStaffFailedAttempts();
     }
 }
 
-// --- Load Dashboard Metrics & Traces ---
+// --- Load Dashboard Metrics ---
 async function loadDashboardMetrics() {
     try {
-        const res = await fetch("/api/tests/results");
-        const data = await res.json();
-        const metrics = data.metrics || {};
+        const res = await fetch("/api/metrics");
+        const metrics = await res.json();
         const b = metrics.baseline || {};
         const p = metrics.protected || {};
 
@@ -304,83 +458,36 @@ async function loadDashboardMetrics() {
 
         document.getElementById("m-base-rate").innerText = `${bRate.toFixed(1)}%`;
         document.getElementById("m-prot-rate").innerText = `${pRate.toFixed(1)}%`;
-
-        renderTracesTable(data.traces || []);
     } catch (err) {
         console.error("Error loading dashboard metrics:", err);
     }
 }
 
-// --- Render Traces Table ---
-function renderTracesTable(traces) {
-    const modeFilter = document.getElementById("traceFilterMode").value;
-    let filtered = traces;
-    if (modeFilter) filtered = traces.filter(t => t.mode === modeFilter);
-
-    const tbody = document.getElementById("tracesTableBody");
-    tbody.innerHTML = "";
-
-    if (filtered.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; color:var(--text-muted);">No request traces recorded yet. Run a test to populate traces.</td></tr>`;
-        return;
-    }
-
-    filtered.forEach(t => {
-        const tr = document.createElement("tr");
-        tr.innerHTML = `
-            <td><code>${t.trace_id}</code></td>
-            <td><span class="badge ${t.mode === 'protected' ? 'badge-info' : 'badge-warning'}">${t.mode}</span></td>
-            <td>${t.test_type}</td>
-            <td>${t.doctor_id} @ ${t.appointment_date} ${t.appointment_time}</td>
-            <td><code>${t.idempotency_key || '-'}</code></td>
-            <td><span class="badge ${t.success ? 'badge-success' : 'badge-danger'}">HTTP ${t.response_status}</span></td>
-            <td><code>${t.database_result}</code></td>
-            <td>${t.duration_ms} ms</td>
-            <td>
-                <button class="btn btn-secondary btn-sm" onclick="openExplanationModal('${t.trace_id}')">💡 Explain</button>
-            </td>
-        `;
-        // Store trace object on row for modal retrieval
-        tr.dataset.traceObj = JSON.stringify(t);
-        tbody.appendChild(tr);
-    });
-}
-
-function loadTraces() {
-    loadDashboardMetrics();
-}
-
 // --- Explanation Modal Layer ---
 function openExplanationModal(traceId) {
-    const rows = Array.from(document.querySelectorAll("#tracesTableBody tr"));
-    const targetRow = rows.find(r => r.dataset.traceObj && JSON.parse(r.dataset.traceObj).trace_id === traceId);
-    if (!targetRow) return;
+    fetch(`/api/traces/${traceId}`).then(res => res.json()).then(t => {
+        const modal = document.getElementById("explanationModal");
+        document.getElementById("modalTitle").innerText = `Trace ${t.trace_id} — Hospital Reviewer Rationale`;
 
-    const t = JSON.parse(targetRow.dataset.traceObj);
-    const modal = document.getElementById("explanationModal");
-    document.getElementById("modalTitle").innerText = `Trace ${t.trace_id} — Hospital Reviewer Explanation`;
+        document.getElementById("modalBody").innerHTML = `
+            <div class="explanation-box" style="margin-top:0;">
+                <div class="explanation-title">Overview Rationale</div>
+                <p>${t.explanation}</p>
+            </div>
+            <br>
+            <p><strong>Request ID:</strong> <code>${t.request_id}</code></p>
+            <p><strong>Role:</strong> ${t.role || 'Patient'}</p>
+            <p><strong>Mode:</strong> ${(t.mode || 'protected').toUpperCase()}</p>
+            <p><strong>Doctor Slot:</strong> ${t.doctor_id} @ ${t.appointment_date} ${t.appointment_time}</p>
+            <p><strong>Idempotency Key:</strong> <code>${t.idempotency_key || 'None'}</code></p>
+            <p><strong>Transaction Status:</strong> <span class="badge ${t.transaction_status === 'COMMITTED' ? 'badge-success' : 'badge-danger'}">${t.transaction_status || 'COMMITTED'}</span></p>
+            <p><strong>Database Result:</strong> <code>${t.database_result}</code></p>
+            <p><strong>Pipeline Steps:</strong> <code>${t.steps || 'N/A'}</code></p>
+            <p><strong>Execution Latency:</strong> ${t.duration_ms} ms</p>
+        `;
 
-    document.getElementById("modalBody").innerHTML = `
-        <div class="explanation-box" style="margin-top:0;">
-            <div class="explanation-title">Overview</div>
-            <p>${t.explanation}</p>
-        </div>
-        <br>
-        <p><strong>Mode:</strong> ${t.mode.toUpperCase()}</p>
-        <p><strong>Test Category:</strong> ${t.test_type}</p>
-        <p><strong>Patient & Doctor Slot:</strong> Patient ${t.patient_id} booking ${t.doctor_id} for ${t.appointment_date} at ${t.appointment_time}</p>
-        <p><strong>Idempotency Key:</strong> <code>${t.idempotency_key || 'None'}</code></p>
-        <p><strong>Database Concurrency Result:</strong> <code>${t.database_result}</code></p>
-        <p><strong>Execution Latency:</strong> ${t.duration_ms} ms</p>
-        <br>
-        <div class="card" style="background:rgba(15,23,42,0.8); font-size:0.85rem;">
-            <strong>Why is Protected Safer than Baseline?</strong><br>
-            Baseline performs a check before inserting. When 10 concurrent requests arrive in the same millisecond, all 10 read 'slot free' before any insertion completes, creating 10 duplicate rows in SQLite.<br><br>
-            The Protected system enforces an atomic database <code>UNIQUE</code> constraint on <code>(patient_id, doctor_id, date, time)</code> inside an immediate transaction, allowing exactly 1 request to succeed and safely rejecting all competing requests.
-        </div>
-    `;
-
-    modal.classList.add("active");
+        modal.classList.add("active");
+    }).catch(err => alert("Trace detail failed to load: " + err.message));
 }
 
 function closeExplanationModalDirect() {
@@ -402,6 +509,8 @@ async function loadConfig() {
         document.getElementById("cfg_enable_idempotency").checked = cfg.ENABLE_IDEMPOTENCY;
         document.getElementById("cfg_enable_concurrency").checked = cfg.ENABLE_CONCURRENCY_PROTECTION;
         document.getElementById("cfg_policy").value = cfg.SLOT_CONFLICT_POLICY;
+        document.getElementById("cfg_enable_tracing").checked = cfg.ENABLE_REQUEST_TRACING !== false;
+        document.getElementById("cfg_enable_explanation").checked = cfg.ENABLE_EXPLANATION_LAYER !== false;
         document.getElementById("cfg_delay").value = cfg.SIMULATED_PROCESSING_DELAY_MS;
     } catch (err) {
         console.error("Error loading config:", err);
@@ -415,16 +524,18 @@ async function handleConfigSubmit(event) {
         ENABLE_IDEMPOTENCY: document.getElementById("cfg_enable_idempotency").checked,
         ENABLE_CONCURRENCY_PROTECTION: document.getElementById("cfg_enable_concurrency").checked,
         SLOT_CONFLICT_POLICY: document.getElementById("cfg_policy").value,
+        ENABLE_REQUEST_TRACING: document.getElementById("cfg_enable_tracing").checked,
+        ENABLE_EXPLANATION_LAYER: document.getElementById("cfg_enable_explanation").checked,
         SIMULATED_PROCESSING_DELAY_MS: parseInt(document.getElementById("cfg_delay").value)
     };
 
     try {
         await fetch("/api/config", {
-            method: "POST",
+            method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(newCfg)
         });
-        alert("Configuration updated successfully!");
+        alert("System business rules updated successfully!");
     } catch (err) {
         alert("Failed to save config: " + err.message);
     }

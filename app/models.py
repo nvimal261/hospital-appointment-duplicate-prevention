@@ -12,6 +12,7 @@ class AppointmentCreate(BaseModel):
     appointment_time: str = Field(..., example="10:00", description="Time HH:MM (24h format)")
     idempotency_key: Optional[str] = Field(None, description="Unique client key for retries")
     retry_number: int = Field(0, description="Attempt number for retries")
+    role: str = Field("Patient", description="User role initiating request ('Patient' or 'Hospital Staff')")
 
 class AppointmentResponse(BaseModel):
     appointment_id: str
@@ -24,11 +25,20 @@ class AppointmentResponse(BaseModel):
     mode: str            # baseline, protected
     created_at: str
     message: Optional[str] = None
+    
+    # Next 35% Explanation & Integration Fields
+    request_id: Optional[str] = None
+    status: Optional[str] = None
+    reason_code: Optional[str] = None
+    human_readable_explanation: Optional[str] = None
+    fallback_actions: Optional[List[str]] = None
+    alternative_slots: Optional[List[Dict[str, str]]] = None
 
 class RequestTrace(BaseModel):
     trace_id: str
     request_id: str
     mode: str                     # baseline or protected
+    role: str = "Patient"
     test_type: str                # normal, retry, concurrent, synthetic
     idempotency_key: Optional[str]
     patient_id: str
@@ -42,6 +52,11 @@ class RequestTrace(BaseModel):
     success: bool
     response_status: int          # HTTP Status Code
     database_result: str          # INSERTED, RETURNED_IDEMPOTENT, SLOT_CONFLICT_REJECTED, DUPLICATE_INSERTED
+    transaction_status: str = "COMMITTED"  # COMMITTED, ROLLED_BACK, REJECTED
+    duplicate_detected: int = 0
+    duplicate_prevented: int = 0
+    error_message: Optional[str] = ""
+    steps: Optional[str] = ""
     explanation: str
 
 class ComparativeMetrics(BaseModel):
@@ -60,3 +75,4 @@ class TestResultSummary(BaseModel):
     failed_requests: int
     prevention_rate_percent: float
     traces: List[RequestTrace]
+
