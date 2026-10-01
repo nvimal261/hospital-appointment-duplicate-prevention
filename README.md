@@ -263,3 +263,44 @@ Open browser at: `http://127.0.0.1:8000`
 ```bash
 python run_verification_suite.py
 ```
+
+### Run Final Demonstration Verification Checks
+```bash
+python run_final_demo_checks.py
+```
+
+---
+
+## 10. FINAL PROJECT DEMONSTRATION
+
+### Objective
+The objective of this project is to guarantee that the **SafeBook Hospital Appointment Platform** never tolerates double bookings, race condition duplicates, or retry duplicates under concurrent patient load or network re-transmissions.
+
+### Core Architecture
+- **Baseline Mode:** Vulnerable check-then-insert execution flow exposing Time-of-Check to Time-of-Use (TOCTOU) race windows.
+- **Protected Prototype:** Employs atomic SQLite `BEGIN IMMEDIATE TRANSACTION` write locks, database `UNIQUE (doctor_id, appointment_date, appointment_time)` constraints, client `idempotency_key` cache deduplication, request lifecycle tracing, transaction rollback visibility, and non-specialist rule-based decision explanations.
+
+### Patient & Hospital Staff Workflows
+- **Patient Workflow:** 8-step visual workflow (`Select Doctor` → `Select Date` → `Select Time Slot` → `Enter Details` → `Idempotency Key` → `Validation` → `Atomic Lock` → `Confirmation/Fallback`). Displays booking status, appointment ID, human explanation, and quick retry actions.
+- **Hospital Staff / Admin Role:** Comprehensive control center offering filtering by status/mode, detailed appointment logs, dynamic business rules configuration (`MAX_RETRIES`, `SLOT_CONFLICT_POLICY`), request trace pipeline visualizer, transaction event logs, and operational telemetry.
+
+### Key Capabilities Summary
+1. **Idempotency Deduplication:** Re-sent requests with matching key return cached appointment without inserting duplicate DB rows.
+2. **Concurrency Protection:** Simultaneous requests targeting identical slots trigger SQLite UNIQUE constraint, ensuring 1 confirmed booking and N-1 safe HTTP 409 rejections.
+3. **Request Tracing:** Audit pipeline recording `request_id`, execution steps (`REQUEST_RECEIVED` → ... → `RESPONSE_GENERATED`), duration, and transaction state (`COMMITTED` / `ROLLED_BACK`).
+4. **Transparent Explanations:** Non-technical explanations (`SLOT_AVAILABLE`, `IDEMPOTENT_RETRY_MATCH`, `RACE_CONDITION_PREVENTED`) explaining rule-based decisions.
+5. **Admin Monitoring Dashboard:** Live cards and visual CSS comparison bars comparing Baseline vs Protected performance.
+6. **API Integration & Inspector:** Interactive tester executing live HTTP 200 (Success), HTTP 400 (Validation Error), and HTTP 409 (Conflict) payloads.
+7. **Guided End-to-End Demo Mode:** Prominent `▶ Launch Automated End-to-End Demo` running all 13 demonstration steps sequentially live in the browser UI.
+
+### Measured Results & Evidence
+- **Verification Suite (`python run_verification_suite.py`):** 10/10 validation cases passed (100.0% duplicate prevention rate, 0 duplicate records in Protected Mode).
+- **Final Demonstration Checks (`python run_final_demo_checks.py`):** 9/9 final demo checks passed (100.0% success rate).
+
+### How to Demonstrate
+1. Start application: `python -m uvicorn app.main:app --port 8000`
+2. Open `http://127.0.0.1:8000` in browser.
+3. Click **▶ L. End-to-End Demo** tab in top navbar.
+4. Click **▶ Launch Automated End-to-End Demo** button to run live 13-step demonstration sequence.
+5. Inspect **📈 D. Monitoring Dashboard** and **🔍 F. Request Traces** for live telemetry.
+

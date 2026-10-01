@@ -37,13 +37,16 @@
         <nav class="nav-tabs">
             <button class="tab-btn active" onclick="switchTab('booking-tab')">📅 A. Booking</button>
             <button class="tab-btn" onclick="switchTab('patient-tab')">👤 B. Patient View</button>
-            <button class="tab-btn admin-only" onclick="switchTab('staff-tab')">🏥 C. Staff/Admin View</button>
-            <button class="tab-btn admin-only" onclick="switchTab('config-tab')">⚙️ D. Configuration</button>
-            <button class="tab-btn admin-only" onclick="switchTab('traces-tab')">🔍 E. Request Traces</button>
-            <button class="tab-btn admin-only" onclick="switchTab('retries-tab')">🔄 F. Retry Events</button>
-            <button class="tab-btn admin-only" onclick="switchTab('transactions-tab')">💳 G. Transaction Events</button>
-            <button class="tab-btn" onclick="switchTab('metrics-tab')">📊 H. Verification Metrics</button>
-            <button class="tab-btn" onclick="switchTab('explanation-tab')">💡 I. Decision Explanations</button>
+            <button class="tab-btn admin-only" onclick="switchTab('staff-tab')">🏥 C. Staff View</button>
+            <button class="tab-btn admin-only" onclick="switchTab('dashboard-tab')">📈 D. Monitoring Dashboard</button>
+            <button class="tab-btn admin-only" onclick="switchTab('config-tab')">⚙️ E. Config</button>
+            <button class="tab-btn admin-only" onclick="switchTab('traces-tab')">🔍 F. Request Traces</button>
+            <button class="tab-btn admin-only" onclick="switchTab('retries-tab')">🔄 G. Retry Events</button>
+            <button class="tab-btn admin-only" onclick="switchTab('transactions-tab')">💳 H. Transactions</button>
+            <button class="tab-btn" onclick="switchTab('metrics-tab')">📊 I. Verification Metrics</button>
+            <button class="tab-btn" onclick="switchTab('explanation-tab')">💡 J. Decision Explanations</button>
+            <button class="tab-btn" onclick="switchTab('api-tab')">🔌 K. API Integration</button>
+            <button class="tab-btn" onclick="switchTab('demo-tab')">▶ L. End-to-End Demo</button>
         </nav>
     </header>
 
@@ -52,6 +55,42 @@
 
         <!-- SECTION A: BOOKING SCREEN -->
         <section id="booking-tab" class="tab-content active">
+            <!-- Patient Workflow Visual Stepper -->
+            <div class="stepper-container">
+                <div class="step-item completed" id="st-1">
+                    <span class="step-num">1</span>
+                    <span class="step-label">Select Doctor</span>
+                </div>
+                <div class="step-item completed" id="st-2">
+                    <span class="step-num">2</span>
+                    <span class="step-label">Select Date</span>
+                </div>
+                <div class="step-item completed" id="st-3">
+                    <span class="step-num">3</span>
+                    <span class="step-label">Time Slot</span>
+                </div>
+                <div class="step-item completed" id="st-4">
+                    <span class="step-num">4</span>
+                    <span class="step-label">Patient Info</span>
+                </div>
+                <div class="step-item active" id="st-5">
+                    <span class="step-num">5</span>
+                    <span class="step-label">Idempotency Key</span>
+                </div>
+                <div class="step-item" id="st-6">
+                    <span class="step-num">6</span>
+                    <span class="step-label">Validation</span>
+                </div>
+                <div class="step-item" id="st-7">
+                    <span class="step-num">7</span>
+                    <span class="step-label">Atomic Lock</span>
+                </div>
+                <div class="step-item" id="st-8">
+                    <span class="step-num">8</span>
+                    <span class="step-label">Confirmation / Conflict</span>
+                </div>
+            </div>
+
             <div class="grid-2col">
                 <!-- Booking Form Card -->
                 <div class="card glass-card">
@@ -176,7 +215,7 @@
             </div>
         </section>
 
-        <!-- SECTION C: STAFF/ADMIN VIEW -->
+        <!-- SECTION C: STAFF VIEW -->
         <section id="staff-tab" class="tab-content">
             <div class="card glass-card">
                 <div class="card-header flex-between">
@@ -234,7 +273,80 @@
             </div>
         </section>
 
-        <!-- SECTION D: CONFIGURATION -->
+        <!-- SECTION D: ADMIN MONITORING DASHBOARD -->
+        <section id="dashboard-tab" class="tab-content">
+            <div class="card glass-card">
+                <div class="card-header flex-between">
+                    <div>
+                        <h2>📈 Admin Monitoring Dashboard</h2>
+                        <p class="subtitle">Live operational metrics, duplicate prevention rates, and safety telemetry.</p>
+                    </div>
+                    <button class="btn btn-secondary" onclick="loadDashboardMetrics()">🔄 Refresh Dashboard</button>
+                </div>
+
+                <div class="metrics-grid margin-top">
+                    <div class="metric-card">
+                        <span class="metric-title">Total Requests Executed</span>
+                        <span class="metric-value" id="dash-total-req">0</span>
+                    </div>
+                    <div class="metric-card">
+                        <span class="metric-title">Successful Bookings</span>
+                        <span class="metric-value text-success" id="dash-success-req">0</span>
+                    </div>
+                    <div class="metric-card">
+                        <span class="metric-title">Rejected / Conflict Requests</span>
+                        <span class="metric-value text-warning" id="dash-rejected-req">0</span>
+                    </div>
+                    <div class="metric-card">
+                        <span class="metric-title">Retry Requests Processed</span>
+                        <span class="metric-value text-info" id="dash-retry-req">0</span>
+                    </div>
+                    <div class="metric-card">
+                        <span class="metric-title">Duplicate Records Prevented</span>
+                        <span class="metric-value text-success" id="dash-prevented-req">0</span>
+                    </div>
+                    <div class="metric-card">
+                        <span class="metric-title">Duplicate Prevention Rate</span>
+                        <span class="metric-value text-info" id="dash-prevention-rate">100.0%</span>
+                    </div>
+                </div>
+
+                <div class="margin-top">
+                    <h3>Baseline vs Protected Comparative Visualizer</h3>
+                    <div class="grid-2col margin-top">
+                        <div class="card">
+                            <h4 style="color:var(--warning)">⚠️ Baseline Mode (Vulnerable)</h4>
+                            <p class="subtitle">Check-then-insert exposes TOCTOU race window under concurrent requests.</p>
+                            <div class="margin-top">
+                                <div><strong>Duplicate Records Created:</strong> <span id="dash-base-dups" class="text-danger bold">18</span></div>
+                                <div class="bar-container">
+                                    <div class="bar-fill-danger" id="dash-base-bar" style="width: 36%;"></div>
+                                </div>
+                            </div>
+                            <div class="margin-top">
+                                <div><strong>Duplicate Prevention Rate:</strong> <span id="dash-base-rate-text" class="text-danger bold">35.7%</span></div>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <h4 style="color:var(--success)">🛡️ Protected Prototype (Atomic UNIQUE Lock)</h4>
+                            <p class="subtitle">Immediate SQLite write lock + idempotency key deduplication guarantee reliability.</p>
+                            <div class="margin-top">
+                                <div><strong>Duplicate Records Created:</strong> <span id="dash-prot-dups" class="text-success bold">0</span></div>
+                                <div class="bar-container">
+                                    <div class="bar-fill-success" id="dash-prot-bar" style="width: 100%;"></div>
+                                </div>
+                            </div>
+                            <div class="margin-top">
+                                <div><strong>Duplicate Prevention Rate:</strong> <span id="dash-prot-rate-text" class="text-success bold">100.0%</span></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- SECTION E: CONFIGURATION -->
         <section id="config-tab" class="tab-content">
             <div class="card glass-card max-width-600">
                 <div class="card-header">
@@ -287,7 +399,7 @@
             </div>
         </section>
 
-        <!-- SECTION E: REQUEST TRACES -->
+        <!-- SECTION F: REQUEST TRACES -->
         <section id="traces-tab" class="tab-content">
             <div class="card glass-card">
                 <div class="card-header flex-between">
@@ -321,7 +433,7 @@
             </div>
         </section>
 
-        <!-- SECTION F: RETRY EVENTS -->
+        <!-- SECTION G: RETRY EVENTS -->
         <section id="retries-tab" class="tab-content">
             <div class="card glass-card">
                 <div class="card-header flex-between">
@@ -353,7 +465,7 @@
             </div>
         </section>
 
-        <!-- SECTION G: TRANSACTION EVENTS -->
+        <!-- SECTION H: TRANSACTION EVENTS -->
         <section id="transactions-tab" class="tab-content">
             <div class="card glass-card">
                 <div class="card-header flex-between">
@@ -384,7 +496,7 @@
             </div>
         </section>
 
-        <!-- SECTION H: VERIFICATION METRICS -->
+        <!-- SECTION I: VERIFICATION METRICS -->
         <section id="metrics-tab" class="tab-content">
 
             <!-- Test Trigger Control Bar -->
@@ -480,7 +592,7 @@
             </div>
         </section>
 
-        <!-- SECTION I: DECISION EXPLANATIONS -->
+        <!-- SECTION J: DECISION EXPLANATIONS -->
         <section id="explanation-tab" class="tab-content">
             <div class="card glass-card">
                 <div class="card-header">
@@ -527,6 +639,96 @@
             </div>
         </section>
 
+        <!-- SECTION K: API INTEGRATION -->
+        <section id="api-tab" class="tab-content">
+            <div class="card glass-card">
+                <div class="card-header">
+                    <h2>🔌 API & Integration Demonstration</h2>
+                    <p class="subtitle">Exposing HTTP 200, HTTP 400, and HTTP 409 API responses for backend integration.</p>
+                </div>
+
+                <div class="grid-2col margin-top">
+                    <div>
+                        <div class="api-card">
+                            <div class="api-endpoint-header">
+                                <span class="api-method api-post">POST</span>
+                                <code>/api/appointments?mode=protected</code>
+                            </div>
+                            <p class="subtitle">Main booking endpoint with concurrency lock & idempotency key support.</p>
+                            <div class="code-snippet">
+{
+  "patient_id": "P-101",
+  "doctor_id": "DOC-CARDIOLOGY-01",
+  "appointment_date": "2026-11-01",
+  "appointment_time": "10:00",
+  "idempotency_key": "IDEM-KEY-9988",
+  "retry_number": 0,
+  "role": "Patient"
+}
+                            </div>
+                        </div>
+
+                        <div class="api-card">
+                            <div class="api-endpoint-header">
+                                <span class="api-method api-get">GET</span>
+                                <code>/api/traces</code>
+                            </div>
+                            <p class="subtitle">Retrieves request lifecycle traces and timing telemetry.</p>
+                        </div>
+
+                        <div class="api-card">
+                            <div class="api-endpoint-header">
+                                <span class="api-method api-get">GET</span>
+                                <code>/api/metrics</code>
+                            </div>
+                            <p class="subtitle">Returns baseline vs protected comparative performance metrics.</p>
+                        </div>
+                    </div>
+
+                    <div>
+                        <h3>Interactive API Endpoint Inspector</h3>
+                        <p class="subtitle">Click buttons below to trigger live API responses and inspect raw JSON payloads.</p>
+                        <div class="margin-top" style="display:flex; gap:8px; flex-wrap:wrap;">
+                            <button class="btn btn-success" onclick="testApiResponse(200)">Test HTTP 200 (Success)</button>
+                            <button class="btn btn-warning" onclick="testApiResponse(400)">Test HTTP 400 (Validation Error)</button>
+                            <button class="btn btn-danger" onclick="testApiResponse(409)">Test HTTP 409 (Conflict)</button>
+                        </div>
+                        <div class="margin-top">
+                            <h4>Live Inspector Output:</h4>
+                            <div id="apiInspectorOutput" class="code-snippet" style="min-height:220px;">
+// Click an API test button above to execute request and inspect response JSON...
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- SECTION L: END-TO-END DEMO -->
+        <section id="demo-tab" class="tab-content">
+            <div class="card glass-card">
+                <div class="card-header flex-between">
+                    <div>
+                        <h2>▶ Guided End-to-End Demonstration Workflow</h2>
+                        <p class="subtitle">Executes the 13-step complete demonstration sequence live with real-time feedback.</p>
+                    </div>
+                    <button class="btn btn-primary btn-lg" onclick="runEndToEndDemo()">
+                        ▶ Launch Automated End-to-End Demo
+                    </button>
+                </div>
+
+                <div class="margin-top">
+                    <h3>Demonstration Step Execution Log</h3>
+                    <div id="demoLogContainer" class="demo-log-container margin-top">
+                        <div class="demo-step-item">
+                            <span class="demo-step-badge demo-pending">READY</span>
+                            <span>Click <strong>'Launch Automated End-to-End Demo'</strong> to run the complete 13-step demonstration sequence.</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
     </main>
 
     <!-- Modal for Detailed Explanation Layer -->
@@ -548,3 +750,4 @@
     <script src="/static/app.js"></script>
 </body>
 </html>
+

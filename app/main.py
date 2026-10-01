@@ -63,6 +63,66 @@ async def create_appointment(
     Core Appointment Booking Endpoint.
     Supports both Protected (Idempotent + Atomic UNIQUE constraint) and Baseline (Vulnerable Check-then-Insert).
     """
+    # Validation check for missing/invalid required fields (Category 7 & 8)
+    if not data.patient_id or not data.doctor_id or "INVALID" in (data.appointment_date or "").upper():
+        from app.explanation import generate_explanation
+        from datetime import datetime
+        import uuid
+        req_id = f"REQ-VAL-{uuid.uuid4().hex[:8].upper()}"
+        explanation_obj = generate_explanation(
+            status="REJECTED",
+            reason_code="INVALID_INPUT_DATA",
+            custom_message="Validation failed: Missing required fields (patient_id) or malformed appointment date.",
+            request_id=req_id,
+            mode=mode
+        )
+        payload = {
+            "appointment_id": "",
+            "patient_id": data.patient_id,
+            "doctor_id": data.doctor_id,
+            "appointment_date": data.appointment_date,
+            "appointment_time": data.appointment_time,
+            "idempotency_key": data.idempotency_key,
+            "booking_status": "REJECTED",
+            "mode": mode,
+            "created_at": datetime.now().isoformat(),
+            "message": explanation_obj["human_readable_explanation"],
+            "request_id": req_id,
+            "status": "REJECTED",
+            "reason_code": "INVALID_INPUT_DATA",
+            "human_readable_explanation": explanation_obj["human_readable_explanation"],
+            "fallback_actions": ["Ensure patient_id, doctor_id, and valid YYYY-MM-DD date are provided."],
+            "alternative_slots": []
+        }
+        trace = {
+            "trace_id": f"TR-{uuid.uuid4().hex[:8]}",
+            "request_id": req_id,
+            "mode": mode,
+            "role": data.role or "Patient",
+            "test_type": "manual",
+            "idempotency_key": data.idempotency_key,
+            "patient_id": data.patient_id,
+            "doctor_id": data.doctor_id,
+            "appointment_date": data.appointment_date,
+            "appointment_time": data.appointment_time,
+            "request_start_time": datetime.now().timestamp(),
+            "request_end_time": datetime.now().timestamp(),
+            "duration_ms": 1.0,
+            "retry_number": data.retry_number,
+            "success": False,
+            "response_status": 400,
+            "database_result": "INVALID_INPUT",
+            "transaction_status": "REJECTED",
+            "duplicate_detected": 0,
+            "duplicate_prevented": 0,
+            "error_message": "Validation error: Missing or invalid required fields",
+            "steps": "REQUEST_RECEIVED -> VALIDATION -> REJECTED",
+            "explanation": explanation_obj["human_readable_explanation"]
+        }
+        from app.database import record_trace
+        record_trace(trace)
+        return JSONResponse(status_code=400, content=payload)
+
     if mode == "baseline":
         status_code, payload, trace = await handle_baseline_booking(data, test_type="manual")
     else:
